@@ -6,6 +6,12 @@
 #define T  true
 #define MLN(NAME,X)  mlctx_tensor_add(C, (NAME), (X))
 
+// The GGML scheduler have problems with inplace operations (2024-07-13)
+#if USE_GGML_SCHED
+	#define ggml_gelu_inplace  ggml_gelu
+	#define ggml_silu_inplace  ggml_silu
+#endif
+
 //ref: pytorch.nn.Linear
 MLTensor* mlb_nn_linear(MLCtx* C, MLTensor* x, int n_out, bool bias)
 {
@@ -157,12 +163,8 @@ MLTensor* mlb_GEGLU(MLCtx* C, MLTensor* x, int d_out)
 	x = MLN("proj", mlb_nn_linear(C, x, d_out*2, true));
 	// [ne3, ne2, ne1, d_out*2]
 	ggml_chunk(C->cc, x, 2, 0, &x, &g);
-		// The GGML scheduler have problems with inplace operations
-#if USE_GGML_SCHED
-	g = ggml_gelu(C->cc, g);
-#else
+	g = ggml_cont(C->cc, g);
 	g = ggml_gelu_inplace(C->cc, g);
-#endif
 	x = ggml_mul(C->cc, x, g);
 	// [ne3, ne2, ne1, d_out]
 	return x;

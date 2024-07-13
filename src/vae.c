@@ -13,6 +13,11 @@
 #define T  true
 #define MLN(NAME,X)  mlctx_tensor_add(C, (NAME), (X))
 
+// The GGML scheduler have problems with inplace operations (2024-07-13)
+#if USE_GGML_SCHED
+	#define ggml_silu_inplace  ggml_silu
+#endif
+
 const VaeParams g_vae_sd1 = {
 	.ch_x			= 3, 
 	.ch_z			= 4,

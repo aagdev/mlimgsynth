@@ -10,6 +10,12 @@
 
 #define MLN(NAME,X)  mlctx_tensor_add(C, (NAME), (X))
 
+// The GGML scheduler have problems with inplace operations (2024-07-13)
+#if USE_GGML_SCHED
+	#define ggml_gelu_inplace  ggml_gelu
+	#define ggml_gelu_quick_inplace  ggml_gelu_quick
+#endif
+
 const ClipParams g_clip_vit_l_14 = {
 	.n_vocab	= 49408,
 	.n_token	= 77,
@@ -255,19 +261,9 @@ MLTensor* mlb_clip_mlp(MLCtx* C, MLTensor* x,
 
 	x = MLN("fc1", mlb_nn_linear(C, x, n_interm, true));
 	if (d_model == 1024 || d_model == 1280) {  //SD2 or SDXL
-		// The GGML scheduler have problems with inplace operations
-#if USE_GGML_SCHED
-		x = ggml_gelu(C->cc, x);
-#else
 		x = ggml_gelu_inplace(C->cc, x);
-#endif
 	} else {  //SD1
-		// The GGML scheduler have problems with inplace operations
-#if USE_GGML_SCHED
-		x = ggml_gelu_quick(C->cc, x);
-#else
 		x = ggml_gelu_quick_inplace(C->cc, x);
-#endif
 	}
 	x = MLN("fc2", mlb_nn_linear(C, x, d_model, true));
 	return x;

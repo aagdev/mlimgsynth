@@ -24,6 +24,16 @@ cflags += -Wno-pedantic
 ldlibs += -lggml
 ldflags += -L$(GGML_LIB_PATH) -Wl,-rpath,$(GGML_LIB_PATH)
 
+## ggml scheduler is need for incomplete backends (e.g. Vulkan)
+ifndef MLIS_NO_GGML_SCHED
+mlimgsynth: cppflags += -DUSE_GGML_SCHED=1
+endif
+
+## Flash Attention (not working yet, crashes)
+ifdef MLIS_FLASH_ATTENTION
+mlimgsynth: cppflags += -DUSE_FLASH_ATTENTION
+endif
+
 # png
 ifndef MLIS_NO_PNG
 mlimgsynth: ldlibs += -lpng
@@ -43,8 +53,6 @@ rng-test: $(common) rng_philox.o rng-test.o
 
 st-util: $(common) ids.o tensorstore.o safetensors.o st-util.o
 
-#mlimgsynth: cppflags += -DUSE_FLASH_ATTENTION
-mlimgsynth: cppflags += -DUSE_GGML_SCHED=1
 mlimgsynth: $(common) ids.o localtensor.o tensorstore.o safetensors.o \
 	ggml_extend.o mlblock.o mlblock_nn.o rng_philox.o tae.o vae.o clip.o unet.o \
 	solvers.o util.o mlimgsynth.o

@@ -140,6 +140,8 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 		return 1;
 	}
 
+	//TODO: validate input ranges
+
 	int i, j;
 	for (i=1; i<argc; ++i) {
 		char * arg = argv[i];
@@ -230,12 +232,12 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 			return 1;
 		}
 	}
-
+	
 	// Save the path of the direction where the binary is located.
 	// May be used later to look for related files.
 	if (argv[0] && argv[0][0]) {
 		const char *tail = path_tail(argv[0]);  // "dir/file" -> "file"
-		if (tail+1 > argv[0]) {
+		if (tail > argv[0]+1) {
 			dstr_copy(S->path_bin, tail - argv[0] - 1, argv[0]);
 			log_debug("bin path: %s", S->path_bin);
 			assert( file_exists(S->path_bin) );
@@ -531,12 +533,12 @@ int mlis_ml_init(MLImgSynthApp* S)
 {
 	int R=1;
 	assert(!S->ctx.backend);
-
+	
 	S->ctx.c.wtype = GGML_TYPE_F16;
 	S->ctx.tstore = &S->tstore;
 
 	// Backend init
-	if (S->c.backend)
+	if (S->c.backend && S->c.backend[0])
 		S->ctx.backend = ggml_backend_reg_init_backend_from_str(S->c.backend);	
 	else 
 		S->ctx.backend = ggml_backend_cpu_init();
@@ -928,6 +930,7 @@ int mlis_generate(MLImgSynthApp* S)
 	int R=1;
 	UnetState ctx={0};
 	Image img={0};
+	DynStr infotxt=NULL;
 	LocalTensor latent={0}, noise={0}, 
 	            cond={0}, label={0},
 				uncond={0}, unlabel={0};
@@ -992,7 +995,7 @@ int mlis_generate(MLImgSynthApp* S)
 		if (S->unet_p->uncond_empty_zero && !(S->c.nprompt && S->c.nprompt[0]))
 			ltensor_for(uncond,i,0) uncond.d[i] = 0;
 	}
-	else if (S->c.nprompt)
+	else if (S->c.nprompt && S->c.nprompt[0])
 		log_warning("negative prompt provided but CFG is not enabled");	
 	
 	debug_ltensor_stats(&uncond, "uncond");
@@ -1095,9 +1098,8 @@ int mlis_generate(MLImgSynthApp* S)
 	}
 
 	// Save latent
-	const char *path_out = S->c.path_out;
-	IFFALSESET(path_out, "latent-out.tensor");
-	ltensor_save_path(&latent, path_out);
+	const char *path_latent = "latent-out.tensor";  //TODO: option
+	ltensor_save_path(&latent, path_latent);
 	
 	mlctx_free(&S->ctx);  //free memory
 
@@ -1107,7 +1109,6 @@ int mlis_generate(MLImgSynthApp* S)
 
 	// Make info text
 	// Imitates stable-diffusion-webui create_infotext
-	DynStr infotxt=NULL;
 	if (S->c.prompt)
 		dstr_printfa(infotxt, "%s\n", S->c.prompt);
 	//TODO: input latent or image filename?
@@ -1137,9 +1138,9 @@ int mlis_generate(MLImgSynthApp* S)
 	IFFALSESET(S->c.path_out, "output.png");
 	log_debug("Writing image to '%s'", S->c.path_out);
 	TRY( img_save_file_info(&img, S->c.path_out, "parameters", infotxt) );
-	dstr_free(infotxt);
 
 end:
+	dstr_free(infotxt);
 	img_free(&img);
 	ltensor_free(&noise);
 	ltensor_free(&uncond);
@@ -1150,7 +1151,7 @@ end:
 }
 
 /* Checks all the operations with deterministic inputs and prints the
- * resulting tensor sums. Useful to easily check if any broke down
+ * resulting tensor sums. Useful to easily check if anything broke down
  * during development. The tests are independent of each other.
  */
 int mlis_check(MLImgSynthApp* S)

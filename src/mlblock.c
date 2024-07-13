@@ -170,6 +170,10 @@ int mlctx_alloc(MLCtx* C)
 	if (!ggml_backend_sched_alloc_graph(C->sched, C->graph))
 		ERROR_LOG(-1, "ggml_backend_sched_alloc_graph");
 
+	mllog_debug("ggml sched splits:%d copies:%d",
+		ggml_backend_sched_get_n_splits(C->sched),
+		ggml_backend_sched_get_n_copies(C->sched) );
+
 	C->info.mem_compute = 0;
 	for (int i=0; i<n_bk; ++i) {
 		size_t s = ggml_backend_sched_get_buffer_size(C->sched, bk_list[i]);
@@ -180,7 +184,7 @@ int mlctx_alloc(MLCtx* C)
 	C->info.mem_total = C->info.mem_params + C->info.mem_compute;
 #endif
 	
-	mllog_info("%s memory use: %.1fMiB (params), %.1fMiB (compute)",
+	mllog_info("%s memory usage: %.1fMiB (params), %.1fMiB (compute)",
 		C->c.name, C->info.mem_params * F_MIB, C->info.mem_compute * F_MIB);
 
 end:

@@ -10,6 +10,11 @@
 #define T  true
 #define MLN(NAME,X)  mlctx_tensor_add(C, (NAME), (X))
 
+// The GGML scheduler have problems with inplace operations (2024-07-13)
+#if USE_GGML_SCHED
+	#define ggml_silu_inplace  ggml_silu
+#endif
+
 float g_log_sigmas_sd[1000];
 
 const UnetParams g_unet_sd1 = {

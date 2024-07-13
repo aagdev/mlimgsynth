@@ -31,7 +31,8 @@ int img_save_file_info(const Image* img, const char* path,
 			log_warning("Could not write '%s' in '%s'", info_key, path);
 	}
 
-	TRY( imgio_save(&imgio, img) );
+	TRY_LOG( imgio_save(&imgio, img),
+		"Could not save image in '%s'", path );
 
 end:
 	dstr_free(tmps);

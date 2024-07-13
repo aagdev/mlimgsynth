@@ -293,8 +293,8 @@ int imgio_png_save_op(CodecPng* S, ImageIO* imgio, Image* img)
 	png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, NULL);
 
 end:
-	alloc_free(IMAGE_IO_ALLOCATOR, texts);
 	alloc_free(IMAGE_IO_ALLOCATOR, row_pointers);
+	alloc_free(IMAGE_IO_ALLOCATOR, texts);
 	if (png_ptr)
 		png_destroy_write_struct(&png_ptr, info_ptr ? &info_ptr : NULL);
 	return R;
