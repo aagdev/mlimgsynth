@@ -83,11 +83,11 @@ void ltensor_from_image(LocalTensor* S, const Image* img)
 {
 	int n0=img->w, n1=img->h, n2=img->bypp;
 	ltensor_resize(S, n0, n1, n2, 1);
-	for (int y=0; y<n0; ++y) {
-		for (int x=0; x<n1; ++x) {
+	for (int y=0; y<n1; ++y) {
+		for (int x=0; x<n0; ++x) {
 			for (int c=0; c<n2; ++c) {
 				float v = IMG_INDEX3(*img, x, y, c) / 255.0f;
-				S->d[n0*n1*c +n1*y +x] = v;
+				S->d[n0*n1*c +n0*y +x] = v;
 			}
 		}
 	}
@@ -98,10 +98,10 @@ void ltensor_to_image(const LocalTensor* S, Image* img)
 	int n0=S->s[0], n1=S->s[1], n2=S->s[2];
 	assert(S->s[2] == 3 && S->s[3] == 1);
 	img_resize(img, n0, n1, IMG_FORMAT_RGB, 0);
-	for (int y=0; y<n0; ++y) {
-		for (int x=0; x<n1; ++x) {
+	for (int y=0; y<n1; ++y) {
+		for (int x=0; x<n0; ++x) {
 			for (int c=0; c<n2; ++c) {
-				float v = S->d[n0*n1*c +n1*y +x];
+				float v = S->d[n0*n1*c +n0*y +x];
 				ccCLAMP(v, 0, 1);
 				IMG_INDEX3(*img, x, y, c) = v * 255.0f;
 			}

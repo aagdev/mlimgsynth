@@ -100,12 +100,12 @@ int sdtae_encode(MLCtx* C, const SdTaeParams* P,
 	
 	mlctx_begin(C, "TAE encode");
 	
-	MLTensor *input = mlctx_input_add(C, "img", GGML_TYPE_F32,
+	MLTensor *input = mlctx_input_new(C, "img", GGML_TYPE_F32,
 		LT_SHAPE_UNPACK(*img) );
 	MLTensor *output = mlb_sdtae_encoder(C, input, P);
 	mlctx_tensor_add(C, "encoder.layers", output);
 
-	TRY( mlctx_run(C, output, latent, img) );
+	TRY( mlctx_run(C, latent, img) );
 
 end:
 	return R;
@@ -120,12 +120,12 @@ int sdtae_decode(MLCtx* C, const SdTaeParams* P,
 	
 	mlctx_begin(C, "TAE decode");
 	
-	MLTensor *input = mlctx_input_add(C, "latent", GGML_TYPE_F32,
+	MLTensor *input = mlctx_input_new(C, "latent", GGML_TYPE_F32,
 		LT_SHAPE_UNPACK(*latent));
 	MLTensor *output = mlb_sdtae_decoder(C, input, P);
 	mlctx_tensor_add(C, "decoder.layers", output);
 
-	TRY( mlctx_run(C, output, img, latent) );
+	TRY( mlctx_run(C, img, latent) );
 
 end:
 	return R;

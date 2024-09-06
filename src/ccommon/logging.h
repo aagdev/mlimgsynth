@@ -85,6 +85,7 @@ __attribute__((format(printf, 2, 3)))
 void log_logf(int level, const char format[], ...);
 
 // Low level interface, no checking
+//TODO: join line_begin and level_check
 void log_line_begin(int level);
 
 void log_line_str(const char* str);

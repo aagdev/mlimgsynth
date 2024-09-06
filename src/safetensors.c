@@ -4,7 +4,6 @@
 #include "safetensors.h"
 #include "ccommon/logging.h"
 #include "ccommon/structio_json.h"
-#include "ccommon/bisect.h"
 #include "ids.h"
 #include <assert.h>
 #include <inttypes.h>

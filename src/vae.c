@@ -224,10 +224,10 @@ int sdvae_encode(MLCtx* C, const VaeParams* P,
 	
 	// Prepare computation
 	mlctx_begin(C, "VAE encode");
-	MLTensor *input = mlctx_input_add(C, "img", GGML_TYPE_F32,
+	MLTensor *input = mlctx_input_new(C, "img", GGML_TYPE_F32,
 		LT_SHAPE_UNPACK(*img) );
 	MLTensor *output = mlb_sdvae_encoder(C, input, P);
-	TRY( mlctx_prep(C, output) );
+	TRY( mlctx_prep(C) );
 
 	// Set input
 	sdvae_encoder_pre(latent, img);  //uses latent as temporal
@@ -254,10 +254,10 @@ int sdvae_decode(MLCtx* C, const VaeParams* P,
 	
 	// Prepare computation
 	mlctx_begin(C, "VAE decode");
-	MLTensor *input = mlctx_input_add(C, "latent", GGML_TYPE_F32,
+	MLTensor *input = mlctx_input_new(C, "latent", GGML_TYPE_F32,
 		LT_SHAPE_UNPACK(*latent));
 	MLTensor *output = mlb_sdvae_decoder(C, input, P);
-	TRY( mlctx_prep(C, output) );
+	TRY( mlctx_prep(C) );
 
 	// Set input
 	ltensor_to_backend(latent, input);

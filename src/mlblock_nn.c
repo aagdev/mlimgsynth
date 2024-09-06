@@ -82,7 +82,7 @@ MLTensor* mlb_nn_groupnorm(MLCtx* C, MLTensor* x,
 	int n = x->ne[2];
 	if (!(eps>0)) eps = 1e-5;
 
-	x = ggml_group_norm(C->cc, x, n_grp);
+	x = ggml_group_norm(C->cc, x, n_grp, eps);
 
 	if (affine) {
 		w = MLN("weight", ggml_new_tensor_1d(C->cp, GGML_TYPE_F32, n));

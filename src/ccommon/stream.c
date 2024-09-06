@@ -283,11 +283,19 @@ int stream_read_prep(Stream* S, size_t nbytes)
 	IFFALSESET(ncheck, STREAM_BUFFER_SIZE/2);
 
 	// Read more data
-	if (!(S->cursor+ncheck <= S->cursor_end) && S->cls->read)
-	{
-		TRYR( stream_ibuffer_increase(S, nbytes) );
-		stream_read_buffer_reposition(S);
-		TRYR( stream_read_buffer_fill(S) );
+	if (S->cls->read) {
+		if (!(S->cursor+ncheck <= S->cursor_end))
+		{
+			TRYR( stream_ibuffer_increase(S, nbytes) );
+			stream_read_buffer_reposition(S);
+			TRYR( stream_read_buffer_fill(S) );
+		}
+	}
+	else {
+		if (S->cursor == S->cursor_end)
+			S->flags |= SF_END;
+		else
+			S->flags &= ~SF_END;
 	}
 
 	if (nbytes && !(S->cursor+nbytes <= S->cursor_end))

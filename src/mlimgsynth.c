@@ -8,14 +8,6 @@
 #include "ccommon/stream.h"
 #include "ccommon/fsutil.h"
 
-#include "ggml.h"
-#include "ggml-alloc.h"
-#include "ggml-backend.h"
-#include "ggml_extend.h"
-
-#include <math.h>
-
-#include "ids.h"
 #include "tensorstore.h"
 #include "safetensors.h"
 #include "localtensor.h"
@@ -27,7 +19,17 @@
 #include "solvers.h"
 #include "util.h"
 
-#define APP_NAME_VERSION "mlimgsynth v0.2"
+#define IDS_IMPLEMENTATION
+#include "ids.h"
+
+#include "ggml.h"
+#include "ggml-alloc.h"
+#include "ggml-backend.h"
+#include "ggml_extend.h"
+
+#include <math.h>
+
+#define APP_NAME_VERSION "mlimgsynth v0.2.1"
 
 #define debug_pause() do { \
 	puts("Press ENTER to continue"); \
@@ -79,7 +81,7 @@ const char help_string[] =
 	"Options:\n"
 	"  -p TEXT            Prompt for text conditioning.\n"
 	"  -n TEXT            Negative prompt for text unconditioning.\n"
-	"  -b NAME            Select a backend for computation.\n"
+	"  -b NAME            Backend for computation.\n"
 	"  -t INT             Number of threads to use in the CPU backend.\n"
 	"  -m PATH            Model file.\n"
 	"  -i PATH            Input image or latent.\n"
@@ -536,6 +538,8 @@ int mlis_ml_init(MLImgSynthApp* S)
 	
 	S->ctx.c.wtype = GGML_TYPE_F16;
 	S->ctx.tstore = &S->tstore;
+	S->ctx.ss = &g_ss;
+	S->tstore.ss = &g_ss;
 
 	// Backend init
 	if (S->c.backend && S->c.backend[0])
@@ -790,10 +794,10 @@ int mlis_clip_cmd(MLImgSynthApp* S)
 {
 	int R=1;
 	LocalTensor embed={0}, feat={0}, feat2={0};
+	
+	TRY( mlis_ml_init(S) );
 
 	bool has_tproj = tstore_tensor_get(&S->tstore, "clip.text.text_projection");
-
-	TRY( mlis_ml_init(S) );
 
 	TRY( mlis_clip_encode(S, S->c.prompt, &embed,
 		has_tproj ? &feat : NULL, S->clip_p, "clip", true) );
@@ -1082,7 +1086,7 @@ int mlis_generate(MLImgSynthApp* S)
 	for (int s=0; s<n_step; ++s)
 	{
 		if (S->c.s_noise > 0 && s > 0) {
-			// Stochastic sampling can help to add detail lost during sampling.
+			// Stochastic sampling may help to add detail lost during sampling.
 			// See Karras2022 Algo2
 			rng_randn(ltensor_nelements(&noise), noise.d);
 			float f = S->c.s_noise,

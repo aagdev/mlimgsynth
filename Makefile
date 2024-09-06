@@ -24,8 +24,8 @@ cflags += -Wno-pedantic
 ldlibs += -lggml
 ldflags += -L$(GGML_LIB_PATH) -Wl,-rpath,$(GGML_LIB_PATH)
 
-## ggml scheduler is need for incomplete backends (e.g. Vulkan)
-ifndef MLIS_NO_GGML_SCHED
+## ggml scheduler is need for incomplete backends (no longer needed for vulkan)
+ifdef MLIS_GGML_SCHED
 mlimgsynth: cppflags += -DUSE_GGML_SCHED=1
 endif
 
@@ -51,8 +51,8 @@ endif
 ### Binary targets
 rng-test: $(common) rng_philox.o rng-test.o
 
-st-util: $(common) ids.o tensorstore.o safetensors.o st-util.o
+st-util: $(common) tensorstore.o safetensors.o st-util.o
 
-mlimgsynth: $(common) ids.o localtensor.o tensorstore.o safetensors.o \
+mlimgsynth: $(common) localtensor.o tensorstore.o safetensors.o \
 	ggml_extend.o mlblock.o mlblock_nn.o rng_philox.o tae.o vae.o clip.o unet.o \
 	solvers.o util.o mlimgsynth.o

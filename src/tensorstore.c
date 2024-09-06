@@ -5,8 +5,47 @@
 #include "ccommon/logging.h"
 #include "ccommon/vector.h"
 #include "ccommon/bisect.h"
-#include "ggml-backend.h"
 #include <inttypes.h>
+
+#ifndef TENSORSTORE_ALLOCATOR
+#define TENSORSTORE_ALLOCATOR  g_allocator
+#endif
+
+#define id_fromz(X)  strsto_add(S->ss, strsl_fromz(X))
+#define id_str(X)  strsto_get(S->ss, X).b
+
+/* Data conversion */
+
+#ifdef TENSORSTORE_USE_GGML
+#include "ggml.h"
+
+#define tstore_fp32_from_fp16(D, S, N) \
+	ggml_fp16_to_fp32_row((S), (D), (N))
+
+#define tstore_fp16_from_fp32(D, S, N) \
+	ggml_fp32_to_fp16_row((S), (D), (N))
+
+#else
+enum {
+	GGML_TYPE_F64=28, GGML_TYPE_F32=0, GGML_TYPE_F16=1,
+	GGML_TYPE_I64=27, GGML_TYPE_I32=26, GGML_TYPE_I16=25, GGML_TYPE_I8=24,
+};
+
+static inline
+void tstore_fp32_from_fp16(float* dst, const void* src, size_t n) {
+	for (size_t i=0; i<n; ++i) dst[i] = ((_Float16*)src)[i];
+}
+
+static inline
+void tstore_fp16_from_fp32(void* dst, const float* src, size_t n) {
+	for (size_t i=0; i<n; ++i) ((_Float16*)dst)[i] = src[i];
+}
+#endif
+
+static inline
+void tstore_fp32_from_fp64(float* dst, const double* src, size_t n) {
+	for (size_t i=0; i<n; ++i) dst[i] = src[i];
+}
 
 /* Data types */
 
@@ -18,7 +57,7 @@ size_t g_tstore_dtype_size[TS_DTYPE__END] = {
 	0, 8, 4, 2, 8, 4, 2, 1
 };
 
-enum ggml_type g_tstore_dtype_ggml_types[TS_DTYPE__END] = {
+int g_tstore_dtype_ggml_types[TS_DTYPE__END] = {
 	-1,
 	GGML_TYPE_F64, GGML_TYPE_F32, GGML_TYPE_F16,
 	GGML_TYPE_I64, GGML_TYPE_I32, GGML_TYPE_I16, GGML_TYPE_I8,
@@ -38,7 +77,7 @@ size_t tstore_dtype_size(int i) {
 	return (0 <= i && i < TS_DTYPE__END) ? g_tstore_dtype_size[i] : 0;
 }
 
-int tstore_dtype_from_ggml(enum ggml_type t)
+int tstore_dtype_from_ggml(int t)
 {
 	for (unsigned i=1; i<TS_DTYPE__END; ++i)
 		if (g_tstore_dtype_ggml_types[i] == t) return i;
@@ -50,12 +89,22 @@ int tstore_dtype_to_ggml(int i)
 	return (0 <= i && i < TS_DTYPE__END) ? g_tstore_dtype_ggml_types[i] : -1;
 }
 
+/* Tensor data */
+
+void tstore_tdata_free(TSTensorData* S)
+{
+	if (S->ownmem) {
+		alloc_free(TENSORSTORE_ALLOCATOR, (void*) S->data);
+		S->data = NULL;
+	}
+}
+
 /* Tensor entry */
 
 void tstore_tensor_free(TSTensorEntry* S)
 {
 	vec_for(S->cache,i,0)
-		alloc_free(g_allocator, (void*) S->cache[i].data);
+		tstore_tdata_free(&S->cache[i]);	
 	vec_free(S->cache);
 }
 
@@ -73,9 +122,18 @@ uint64_t tstore_tensor_size(const TSTensorEntry* S)
 	return size;	
 }
 
-int tstore_tensor_data_get(TSTensorEntry* S, TSDType dtype, TSTensorData* out)
+int tstore_tensor_data_get(TSTensorEntry* S, TSDType dtype, int flags, 
+	TSTensorData* out)
 {
 	int R=1;
+	bool f_perm = flags & TSTDG_F_PERM;
+		
+	BISECT_RIGHT_DECL(found, idx, 0, vec_count(S->cache),
+		S->cache[i_].dtype - dtype);
+	if (found) {
+		*out = S->cache[idx];
+		return 1;
+	}
 
 	TRY_LOG( stream_seek(S->stm, S->offset, 0), "seek to %"PRIu64, S->offset );
 	if (stream_read_prep(S->stm, S->size) < S->size)
@@ -83,78 +141,53 @@ int tstore_tensor_data_get(TSTensorEntry* S, TSDType dtype, TSTensorData* out)
 	const void *cur = stream_buffer_get(S->stm, NULL);
 
 	if (dtype == S->dtype) {  //direct
-		*out = (TSTensorData){ dtype, cur, S->size };
-	}
-	else {  //convert
-		BISECT_RIGHT_DECL(found, idx, 0, vec_count(S->cache),
-			S->cache[i_].dtype - dtype);
-		if (found) *out = S->cache[idx];
-		// Data type conversion
-		else if (dtype == TS_DTYPE_F32 && S->dtype == TS_DTYPE_F16)
-		{
-			size_t n = tstore_tensor_count(S), sz=n*4;
-			void *data = alloc_alloc(g_allocator, sz);
-			ggml_fp16_to_fp32_row(cur, data, n);
-			*out = (TSTensorData){ dtype, data, sz };
-			vec_insert(S->cache, idx, 1, out);
-			R = TSTG_R_CONVERT;
+		if (stream_mmap_is(S->stm)) {
+			*out = (TSTensorData){ dtype, cur, S->size, .perm=true };
 		}
-		else if (dtype == TS_DTYPE_F16 && S->dtype == TS_DTYPE_F32)
-		{
-			size_t n = tstore_tensor_count(S), sz=n*2;
-			void *data = alloc_alloc(g_allocator, sz);
-			ggml_fp32_to_fp16_row(cur, data, n);
-			*out = (TSTensorData){ dtype, data, sz };
-			vec_insert(S->cache, idx, 1, out);
-			R = TSTG_R_CONVERT;
-		}
-		else if (dtype == TS_DTYPE_F32 && S->dtype == TS_DTYPE_F64)
-		{
-			size_t n = tstore_tensor_count(S), sz=n*4;
-			float *data = alloc_alloc(g_allocator, sz);
-			for (size_t i=0; i<n; ++i) data[i] = ((double*)cur)[i];
-			*out = (TSTensorData){ dtype, data, sz };
-			vec_insert(S->cache, idx, 1, out);
-			R = TSTG_R_CONVERT;
+		else if (f_perm) {
+			size_t sz = S->size;
+			void *data = alloc_alloc(TENSORSTORE_ALLOCATOR, sz);
+			memcpy(data, cur, sz);
+			*out = (TSTensorData){ dtype, data, sz, .ownmem=true, .perm=true };
 		}
 		else {
-			ERROR_LOG(-1, "unsupported conversion from %s to %s",
-				tstore_dtype_str(S->dtype), tstore_dtype_str(dtype));
+			*out = (TSTensorData){ dtype, cur, S->size };
 		}
 	}
+	// Data type conversion
+	else if (dtype == TS_DTYPE_F32 && S->dtype == TS_DTYPE_F16)
+	{
+		size_t n = tstore_tensor_count(S), sz=n*4;
+		void *data = alloc_alloc(TENSORSTORE_ALLOCATOR, sz);
+		tstore_fp32_from_fp16(data, cur, n);
+		*out = (TSTensorData){ dtype, data, sz, .ownmem=true, .perm=true };
+		R = TSTDG_R_CONVERT;
+	}
+	else if (dtype == TS_DTYPE_F16 && S->dtype == TS_DTYPE_F32)
+	{
+		size_t n = tstore_tensor_count(S), sz=n*2;
+		void *data = alloc_alloc(TENSORSTORE_ALLOCATOR, sz);
+		tstore_fp16_from_fp32(data, cur, n);
+		*out = (TSTensorData){ dtype, data, sz, .ownmem=true, .perm=true };
+		R = TSTDG_R_CONVERT;
+	}
+	else if (dtype == TS_DTYPE_F32 && S->dtype == TS_DTYPE_F64)
+	{
+		size_t n = tstore_tensor_count(S), sz=n*4;
+		float *data = alloc_alloc(TENSORSTORE_ALLOCATOR, sz);
+		tstore_fp32_from_fp64(data, (double*)cur, n);
+		*out = (TSTensorData){ dtype, data, sz, .ownmem=true, .perm=true };
+		R = TSTDG_R_CONVERT;
+	}
+	else {
+		ERROR_LOG(-1, "unsupported conversion from %s to %s",
+			tstore_dtype_str(S->dtype), tstore_dtype_str(dtype));
+	}
+	
+	if (f_perm)
+		vec_insert(S->cache, idx, 1, out);
 	
 end:
-	return R;
-}
-
-int tstore_tensor_read(TSTensorEntry* S, struct ggml_tensor* t)
-{
-	int R=1;
-
-	// Check shape
-	int i=GGML_MAX_DIMS;
-	//if (S->shape_n <= GGML_MAX_DIMS) {  //TODO
-	//	for (i=0; i<S->shape_n; ++i)
-	//		if (S->shape[i] != t->ne[i]) break;
-	//}
-	//if (i != S->shape_n)
-	if (ggml_nelements(t) != tstore_tensor_count(S))
-		ERROR_LOG(-1, "wrong shape (%u): %ux%ux%ux%u -> "
-			"%"PRId64"x%"PRId64"x%"PRId64"x%"PRId64, i,
-			S->shape[0], S->shape[1], S->shape[2], S->shape[3],
-			t->ne[0], t->ne[1], t->ne[2], t->ne[3]);
-	
-	// Data type
-	int target = tstore_dtype_from_ggml(t->type);
-	if (target < 0) ERROR_LOG(-1, "unsupported tensor ggml type %s",
-		ggml_type_name(t->type));
-
-	TSTensorData td={0};
-	TRY( R = tstore_tensor_data_get(S, target, &td) );
-	ggml_backend_tensor_set(t, td.data, 0, td.size);
-
-end:
-	if (R<0) log_error("could not read tensor '%s'", id_str(S->key));
 	return R;
 }
 

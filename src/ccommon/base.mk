@@ -13,12 +13,12 @@
 objdir = obj
 depdir = .d
 
-flags = $(FLAGS)
-cflags = -std=c99 -Wall -pedantic $(CFLAGS)
+flags    = $(FLAGS)
 cppflags = $(CPPFLAGS)
+cflags   = -std=c99 -Wall -pedantic $(CFLAGS)
 cxxflags = $(CXXFLAGS)
-ldlibs = $(LDLIBS)
-ldflags = $(LDFLAGS)
+ldlibs   = $(LDLIBS)
+ldflags  = $(LDFLAGS)
 
 depflags = -MT $@ -MMD -MP -MF $(depdir)/$*.d
 
@@ -60,8 +60,8 @@ endif
 .SECONDARY:
 
 ### Commands
-COMPILE_C = $(CC) $(depflags) $(flags) $(cppflags) $(cflags) -c -o $@ $<
-COMPILE_CPP = $(CXX) $(depflags) $(flags) $(cppflags) $(cxxflags) -c -o $@ $<
+COMPILE_C   = $(CC)  $(depflags) $(flags) $(cppflags) $(cflags)   -c -o $@ $<
+COMPILE_CXX = $(CXX) $(depflags) $(flags) $(cppflags) $(cxxflags) -c -o $@ $<
 #LINK = $(CC) $(flags) $(ldflags) -o $@ $^ $(ldlibs)
 LINK = $(CC) $(flags) $(ldflags) -o $@ \
 	$(addprefix $(objdir)/,$(filter %.o,$^)) $(ldlibs)
@@ -124,10 +124,10 @@ endif
 
 $(objdir)/%.o: %.cpp
 ifdef verbose
-	$(COMPILE_CPP)
+	$(COMPILE_CXX)
 else
-	@echo "CC $@"
-	@$(COMPILE_CPP)
+	@echo "CXX $@"
+	@$(COMPILE_CXX)
 endif
 
 ###

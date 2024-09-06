@@ -140,6 +140,7 @@ void str_lower(DynStr str) {
 int clip_tokr_tokenize(ClipTokenizer* S, const char* cur, int32_t** pout)
 {
 	int R=1;
+	DynStr word=NULL, bigram=NULL;
 	const char *end = cur + strlen(cur);
 
 	while (1) {
@@ -172,8 +173,6 @@ other:
 		}
 
 		size_t len = cur-beg;
-		DynStr word=dstr_stack(32);
-		if (len >= vec_capacity(word)) ERROR_LOG(-1, "word too long");
 		dstr_copy(word, len, beg);
 		str_lower(word);
 		dstr_appendz(word, "</w>");
@@ -196,7 +195,6 @@ other:
 
 		// BPE (byte pair encoding)
 		unsigned nvocab = strsto_count(&S->vocab);
-		DynStr bigram=dstr_stack(16);
 		while (vec_count(tokens) >= 2) {
 			StringInt best_iv=nvocab;
 			unsigned best_ib=vec_count(breaks);
@@ -224,6 +222,8 @@ other:
 
 end:
 	if (R<0) log_error("CLIP tokenizer");
+	dstr_free(bigram);
+	dstr_free(word);
 	return R;
 }
 
@@ -234,11 +234,12 @@ MLTensor* mlb_clip_embeddings(MLCtx* C, MLTensor* x, MLTensor* tw,
 	mlctx_block_begin(C);
 	// x: [N, n_token]
 	
-	if (tw)
+	if (tw) {
 		GGML_ASSERT(tw->ne[0] == d_embed);
-	else
+	} else {
 		tw = MLN("token_embedding.weight",
 			ggml_new_tensor_2d(C->cp, C->c.wtype, d_embed, n_vocab));
+	}
 	
 	pw = MLN("position_embedding.weight",
 		ggml_new_tensor_2d(C->cp, GGML_TYPE_F32, d_embed, n_token));
@@ -370,7 +371,7 @@ int clip_text_encode(MLCtx* C, const ClipParams* P,
 	// Prepare computation
 	mlctx_begin(C, "CLIP text encode");
 
-	MLTensor *input = mlctx_input_add(C, "tokens", GGML_TYPE_I32, P->n_token,1,1,1);
+	MLTensor *input = mlctx_input_new(C, "tokens", GGML_TYPE_I32, P->n_token,1,1,1);
 	MLTensor *t_embed = mlb_clip_text(C, input, NULL, P, clip_skip, norm);
 
 	MLTensor *result=t_embed, *t_feat=NULL;
@@ -378,7 +379,7 @@ int clip_text_encode(MLCtx* C, const ClipParams* P,
 		result = t_feat = mlb_clip_text_proj(C, t_embed, ntok+1);
 
 	mlctx_tensor_add(C, "text", result);
-	TRY( mlctx_prep(C, result) );
+	TRY( mlctx_prep(C) );
 
 	// Set input
 	ggml_backend_tensor_set(input, tokens, 0, vec_bytesize(tokens));

@@ -32,6 +32,7 @@
 #include <string.h>
 
 //TODO: use alloc_size for capacity ?
+//TODO: vec_push(P, ...) to allow commas in the value ?
 
 #ifndef VECTOR_DEF_ALLOC
 #define VECTOR_DEF_ALLOC  g_allocator_dopt

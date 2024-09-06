@@ -6,8 +6,7 @@
 #pragma once
 #include "ccommon/stream.h"
 #include "ccommon/vector.h"
-#include "ggml.h"
-#include "ids.h"
+#include "ccommon/stringstore.h"
 
 typedef enum { 
 	TS_DTYPE_F64 = 1,
@@ -26,14 +25,18 @@ const char * tstore_dtype_str(int t);
 size_t tstore_dtype_size(int t);
 
 // Returns -1 if not found
-int tstore_dtype_from_ggml(enum ggml_type t);
-int tstore_dtype_to_ggml(int t);
+int tstore_dtype_from_ggml(int ggml_type);
+int tstore_dtype_to_ggml(int tstore_dtype);
 
 typedef struct {
-	TSDType dtype;  //target dtype
+	TSDType dtype;  	//data type
 	const void *data;
 	size_t size;
+	unsigned ownmem:1,
+	         perm:1;	//<data> remains valid for the lifetime of the tensor
 } TSTensorData;
+
+void tstore_tdata_free(TSTensorData*);
 
 typedef struct {
 	int key;  //str_id
@@ -47,9 +50,17 @@ typedef struct {
 uint64_t tstore_tensor_count(const TSTensorEntry* S);
 uint64_t tstore_tensor_size(const TSTensorEntry* S);
 
-int tstore_tensor_data_get(TSTensorEntry* S, TSDType dtype, TSTensorData* out);
-int tstore_tensor_read(TSTensorEntry* S, struct ggml_tensor* t);
-enum { TSTG_R_DIRECT=1, TSTG_R_CONVERT=2 };
+/* Return a TSTensorData object with the tensor data with type dtype.
+ * If flags & TSTDG_F_PERM, the data pointer is permanent, otherwise,
+ * the TSTensorData object must be free'd after use.
+ * Return TSTDG_R_DIRECT if the data was taken directly from the stream,
+ * TSTDG_R_CONVERT if it was converted, or a negative error code;
+ */
+int tstore_tensor_data_get(TSTensorEntry* S, TSDType dtype, int flags,
+	TSTensorData* out);
+
+enum { TSTDG_F_PERM=1 };
+enum { TSTDG_R_DIRECT=1, TSTDG_R_CONVERT=2 };
 
 #define TSTENSOR_SHAPE4_FMT  "%ux%ux%ux%u"
 #define TSTENSOR_SHAPE4_UNPACK(T) \
@@ -71,6 +82,8 @@ typedef struct {
 	// Allows to transform tensor names
 	int (*cb_add)(void*, DynStr*);
 	void *cb_user;
+
+	StringStore *ss;  //externa store for tensor names strings
 } TensorStore;
 
 void tstore_free(TensorStore*);
@@ -93,5 +106,6 @@ TSTensorEntry* tstore_tensor_getk(const TensorStore*, StringInt key);
 
 static inline
 TSTensorEntry* tstore_tensor_get(const TensorStore* S, const char* name) {
-	return tstore_tensor_getk(S, id_fromz(name));
+	int key = strsto_add(S->ss, strsl_fromz(name));
+	return tstore_tensor_getk(S, key);
 }

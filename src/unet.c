@@ -345,14 +345,14 @@ int unet_denoise_init(UnetState* S, MLCtx* C, const UnetParams* P,
 		C->c.multi_compute = true;
 		mlctx_begin(C, "UNet");
 
-		MLTensor *t_x, *t_t, *t_c, *t_l=NULL, *result;
-		t_x = mlctx_input_add(C, "x", GGML_TYPE_F32, lw, lh, 4, 1);
-		t_t = mlctx_input_add(C, "t", GGML_TYPE_F32, 1,1,1,1);
-		t_c = mlctx_input_add(C, "c", GGML_TYPE_F32, P->n_ctx, 77, 1, 1);
+		MLTensor *t_x, *t_t, *t_c, *t_l=NULL;
+		t_x = mlctx_input_new(C, "x", GGML_TYPE_F32, lw, lh, 4, 1);
+		t_t = mlctx_input_new(C, "t", GGML_TYPE_F32, 1,1,1,1);
+		t_c = mlctx_input_new(C, "c", GGML_TYPE_F32, P->n_ctx, 77, 1, 1);
 		if (P->ch_adm_in)
-			t_l = mlctx_input_add(C, "l", GGML_TYPE_F32, P->ch_adm_in, 1,1,1);
-		result = mlb_unet_denoise(C, t_x, t_t, t_c, t_l, P);
-		TRY( mlctx_prep(C, result) );
+			t_l = mlctx_input_new(C, "l", GGML_TYPE_F32, P->ch_adm_in, 1,1,1);
+		mlb_unet_denoise(C, t_x, t_t, t_c, t_l, P);
+		TRY( mlctx_prep(C) );
 	}
 
 	S->ctx = C;
@@ -397,11 +397,11 @@ int unet_compute_split(MLCtx* C, const UnetParams* P,
 	// First half
 	mlctx_begin(C, "UNet 1/2");
 
-	t_x = mlctx_input_add(C, "x", GGML_TYPE_F32, x->s[0], x->s[1], 4, 1);
-	t_t = mlctx_input_add(C, "t", GGML_TYPE_F32, 1,1,1,1);
-	t_c = mlctx_input_add(C, "c", GGML_TYPE_F32, P->n_ctx, 77, 1, 1);
+	t_x = mlctx_input_new(C, "x", GGML_TYPE_F32, x->s[0], x->s[1], 4, 1);
+	t_t = mlctx_input_new(C, "t", GGML_TYPE_F32, 1,1,1,1);
+	t_c = mlctx_input_new(C, "c", GGML_TYPE_F32, P->n_ctx, 77, 1, 1);
 	if (P->ch_adm_in)
-		t_l = mlctx_input_add(C, "l", GGML_TYPE_F32, P->ch_adm_in, 1,1,1);
+		t_l = mlctx_input_new(C, "l", GGML_TYPE_F32, P->ch_adm_in, 1,1,1);
 	
 	mlctx_block_begin(C);
 	t_e = mlb_unet__embed(C, t_t, t_l, P);
@@ -409,7 +409,7 @@ int unet_compute_split(MLCtx* C, const UnetParams* P,
 	out = mlb_unet__mid(C, out, t_e, t_c, P);
 	ggml_set_output(t_e);
 	vec_for(tstack,i,0) ggml_set_output(tstack[i]);
-	TRY( mlctx_prep(C, out) );
+	TRY( mlctx_prep(C) );
 	
 	ltensor_to_backend(x, t_x);
 	ggml_backend_tensor_set(t_t, &t, 0, sizeof(t));
@@ -426,16 +426,16 @@ int unet_compute_split(MLCtx* C, const UnetParams* P,
 	// Second half
 	mlctx_begin(C, "UNet 2/2");
 	
-	t_x = mlctx_input_add(C, "x", GGML_TYPE_F32, LT_SHAPE_UNPACK(*dx));
-	t_e = mlctx_input_add(C, "e", GGML_TYPE_F32, LT_SHAPE_UNPACK(emb));
-	t_c = mlctx_input_add(C, "c", GGML_TYPE_F32, P->n_ctx, 77, 1, 1);
+	t_x = mlctx_input_new(C, "x", GGML_TYPE_F32, LT_SHAPE_UNPACK(*dx));
+	t_e = mlctx_input_new(C, "e", GGML_TYPE_F32, LT_SHAPE_UNPACK(emb));
+	t_c = mlctx_input_new(C, "c", GGML_TYPE_F32, P->n_ctx, 77, 1, 1);
 	vec_for(lstack,i,0)
-		tstack[i] = mlctx_input_add(C, "skip", GGML_TYPE_F32,
+		tstack[i] = mlctx_input_new(C, "skip", GGML_TYPE_F32,
 			LT_SHAPE_UNPACK(lstack[i]));
 
 	mlctx_block_begin(C);
 	out = mlb_unet__out(C, t_x, t_e, t_c, P, &tstack);
-	TRY( mlctx_prep(C, out) );
+	TRY( mlctx_prep(C) );
 	
 	ltensor_to_backend(dx, t_x);
 	ltensor_to_backend(&emb, t_e);

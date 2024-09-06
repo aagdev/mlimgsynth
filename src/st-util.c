@@ -6,9 +6,11 @@
 #include "ccommon/timing.h"
 #include "ccommon/logging.h"
 #include "ccommon/stream.h"
-#include "ids.h"
 #include "safetensors.h"
 #include <inttypes.h>
+
+#define IDS_IMPLEMENTATION
+#include "ids.h"
 
 typedef struct Options {
 	const char *path_in, *path_out, *tname;
@@ -171,7 +173,7 @@ end:
 int convert16(Stream* so, const TensorStore* sti)
 {
 	int R=1;
-	TensorStore sto={0};
+	TensorStore sto={ .ss=&g_ss };
 
 	tstore_copy_from(&sto, sti);
 	vec_forp(TSTensorEntry, sto.tensors, e, 0) {
@@ -258,7 +260,7 @@ int main(int argc, char* argv[])
 	int R=0, r;
 	Options opts={0};
 	Stream si={0}, so={0};
-	TensorStore sti={0};
+	TensorStore sti={ .ss=&g_ss };
 
 	ids_init();
 

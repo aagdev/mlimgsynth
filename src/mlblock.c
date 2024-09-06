@@ -13,6 +13,9 @@
 #define mllog_warn(...)    if (!C->c.quiet) log_warn(__VA_ARGS__)
 #define mllog_error(...)   log_error(__VA_ARGS__)
 
+#define id_fromz(X)  strsto_add(C->ss, strsl_fromz(X))
+#define id_str(X)  strsto_get(C->ss, X).b
+
 void mlctx_free(MLCtx* C)
 {
 	if (C->allocr) {
@@ -58,17 +61,21 @@ int mlctx_load_prep(MLCtx* C)
 	DynStr name=NULL;
 	struct SEntry { MLCtxTensor* p; unsigned iname; } * stack=NULL;  //vector
 
+	IFFALSESET(C->c.tpath_sep, '.');
+
 	vec_forrp(MLCtxTensor, C->tensors, p)
 	{
 		unsigned nlen = dstr_count(name);
 
-		if (p->name == ID_ML_BLOCK_BEGIN) {
+		if (p->name == MLB_NAME_BLOCK_BEGIN) {
 			if (!vec_count(stack)) ERROR_LOG(-1, "invalid ML graph");
 			struct SEntry e = vec_pop(stack);
 			dstr_resize(name, e.iname);
 		}
+		else if (p->name == MLB_NAME_SPLIT) {
+		}
 		else {
-			if (name) dstr_push(name, '.');
+			if (name) dstr_push(name, C->c.tpath_sep);
 			dstr_appendz(name, id_str(p->name));
 
 			if (p->tensor->op == GGML_OP_NONE) {  //param
@@ -93,7 +100,11 @@ int mlctx_build(MLCtx* C, MLTensor* result)
 	int R=1;
 	assert(!C->graph);
 	
-	//TRY( mlctx_block_graph_dump_path(&ctx, "dump-graph.txt") );
+	if (C->c.dump) {
+		DynStr path = dstr_stack(64);
+		dstr_printf(path, "%s-graph.txt", C->c.name);
+		TRYR( mlctx_block_graph_dump_path(C, path) );
+	}
 	
 	mllog_debug("%s result: %s", C->c.name, ggml_tensor_typeshape_desc(result));
 
@@ -123,6 +134,13 @@ int mlctx_build(MLCtx* C, MLTensor* result)
 
 	// Computation graph
 	C->graph = ggml_new_graph_custom(C->cc, C->c.n_tensor_max, false);
+
+	vec_forp(MLCtxTensor, C->tensors, p, 0) {
+		if (p->name == MLB_NAME_SPLIT) {  //TODO: split == output ?
+    		ggml_build_forward_expand(C->graph, p->tensor);
+		}
+	}
+
     ggml_build_forward_expand(C->graph, result);
 	mllog_debug("graph size:%d n_nodes:%d n_leafs:%d",
 		C->graph->size, C->graph->n_nodes, C->graph->n_leafs);
@@ -199,6 +217,37 @@ int mlctx_build_alloc(MLCtx* C, MLTensor* result)
 	return 1;
 }
 
+int tstore_tensor_read(TSTensorEntry* S, struct ggml_tensor* t)
+{
+	int R=1;
+
+	// Check shape
+	int i=GGML_MAX_DIMS;
+	//if (S->shape_n <= GGML_MAX_DIMS) {  //TODO
+	//	for (i=0; i<S->shape_n; ++i)
+	//		if (S->shape[i] != t->ne[i]) break;
+	//}
+	//if (i != S->shape_n)
+	if (ggml_nelements(t) != tstore_tensor_count(S))
+		ERROR_LOG(-1, "wrong shape (%u): %ux%ux%ux%u -> "
+			"%"PRId64"x%"PRId64"x%"PRId64"x%"PRId64, i,
+			S->shape[0], S->shape[1], S->shape[2], S->shape[3],
+			t->ne[0], t->ne[1], t->ne[2], t->ne[3]);
+	
+	// Data type
+	int target = tstore_dtype_from_ggml(t->type);
+	if (target < 0) ERROR_LOG(-1, "unsupported tensor ggml type %s",
+		ggml_type_name(t->type));
+
+	TSTensorData td={0};
+	TRY( R = tstore_tensor_data_get(S, target, 0, &td) );
+	ggml_backend_tensor_set(t, td.data, 0, td.size);
+	tstore_tdata_free(&td);
+
+end:
+	return R;
+}
+
 int mlctx_tstore_load(MLCtx* C, TensorStore* ts)
 {
 	int R=1, r;
@@ -214,8 +263,9 @@ int mlctx_tstore_load(MLCtx* C, TensorStore* ts)
 		if (!e) ERROR_LOG(-1, "tensor '%s' not found", id_str(p->key));
 		
 		mllog_debug2("loading tensor '%s'", id_str(p->key));
-		TRY( r = tstore_tensor_read(e, p->tensor) );
-		C->info.n_conv += (r == TSTG_R_CONVERT);
+		TRY_LOG(r = tstore_tensor_read(e, p->tensor),
+			"could not read tensor '%s'", id_str(p->key));
+		C->info.n_conv += (r == TSTDG_R_CONVERT);
 	}
 
 	C->info.t_load = timing_time() - t;
@@ -246,20 +296,20 @@ end:
 	return R;
 }
 
-int mlctx_prep(MLCtx* C, MLTensor* result)
+int mlctx_prep(MLCtx* C)
 {
+	MLTensor *result = vec_last(C->tensors,0).tensor;
 	if (C->tprefix) mlctx_tensor_add(C, C->tprefix, result);
 	TRYR( mlctx_build_alloc(C, result) );
 	TRYR( mlctx_tstore_load(C, C->tstore) );
 	return 1;
 }
 
-int mlctx_run_(MLCtx* C, MLTensor* result, LocalTensor* out,
-	const LocalTensor** inputs)
+int mlctx_run_(MLCtx* C, LocalTensor* out, const LocalTensor** inputs)
 {
 	int R=1;
 
-	TRY( mlctx_prep(C, result) );
+	TRY( mlctx_prep(C) );
 
 	vec_for(C->inputs,i,0) {
 		if (!inputs[i]) break;
@@ -268,7 +318,10 @@ int mlctx_run_(MLCtx* C, MLTensor* result, LocalTensor* out,
 
 	TRY( mlctx_compute(C) );
 
-	if (out) ltensor_from_backend(out, result);
+	if (out) {
+		MLTensor *result = vec_last(C->tensors,0).tensor;
+		ltensor_from_backend(out, result);
+	}
 
 end:
 	mlctx_free(C);
@@ -279,27 +332,26 @@ void mlctx_block_graph_dump(const MLCtx* C, Stream* out)
 {
 	const MLCtxTensor ** stack=NULL;  //vector
 	vec_forrp(const MLCtxTensor, C->tensors, p) {
-		if (p->name == ID_ML_BLOCK_BEGIN) {
+		if (p->name == MLB_NAME_BLOCK_BEGIN) {
 			if (!vec_count(stack)) {
 				stream_str_put(out, "ERROR INVALID ML BLOCK GRAPH\n");
 				goto end;
 			}
 			vec_pop(stack);
-		} else {
+		}
+		else {
 			vec_for(stack,i,0) stream_str_put(out, "  ");  //indent
-			stream_printf(out, "%s: %s " GGML_TYPESHAPE_FMT "\n",
-				id_str(p->name), ggml_op_name(p->tensor->op),
-					GGML_TYPESHAPE_ARGS(p->tensor) );
-			if (p->tensor->op != GGML_OP_NONE)  //block
-				vec_push(stack, p);
 
-			//if (p->tensor->op == GGML_OP_NONE) {  //param
-			//	stream_printf(out, "%s: %s " GGML_SHAPE_FMT "\n",
-			//		id_str(p->name), GGML_TYPESHAPE_ARGS(p->tensor) );
-			//} else {  //block
-			//	stream_printf(out, "%s\n", id_str(p->name));
-			//	vec_push(stack, p);
-			//}
+			const char *name;
+			if (p->name == MLB_NAME_SPLIT) name = "SPLIT";
+			else name = id_str(p->name);
+
+			stream_printf(out, "%s: %s " GGML_TYPESHAPE_FMT "\n",
+				name, ggml_op_name(p->tensor->op),
+					GGML_TYPESHAPE_ARGS(p->tensor) );
+
+			if (p->tensor->op != GGML_OP_NONE && p->name != MLB_NAME_SPLIT)  //block
+				vec_push(stack, p);
 		}
 	}
 end:

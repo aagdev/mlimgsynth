@@ -235,7 +235,7 @@ long stream_write(Stream*restrict S, size_t nbytes, const void*restrict buffer);
  * Returns 0 on success.
  */
 static inline
-int stream_write_chk(Stream*restrict S, size_t nbytes, void*restrict buffer);
+int stream_write_chk(Stream*restrict S, size_t nbytes, const void*restrict buffer);
 
 /* Changes the position of the stream cursor if posible.
  *
@@ -331,6 +331,15 @@ enum {
 	STREAM_STD_OUT = 1,
 	STREAM_STD_ERR = 2,
 };
+
+/* Return true if the stream is fully memory mapped.
+ * In that case, the buffers returned are not invalidated by any operation
+ * except closing the stream.
+ */
+static inline
+bool stream_mmap_is(Stream* S) {
+	return !S->cls->read && !S->cls->write && !S->cls->seek;
+}
 
 /* Loads a file completely in a memory stream.
  * Returns 0 on success, a negative error code on failure.
@@ -486,7 +495,7 @@ long stream_write(Stream*restrict S, size_t nbytes, const void*restrict buffer)
 }
 
 static inline
-int stream_write_chk(Stream*restrict S, size_t nbytes, void*restrict buffer)
+int stream_write_chk(Stream*restrict S, size_t nbytes, const void*restrict buffer)
 {
 	long r = stream_write(S, nbytes, buffer);
 	if (r < 0) return r;

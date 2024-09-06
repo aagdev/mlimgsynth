@@ -86,7 +86,7 @@ void * alloc_alloc(Allocator* a, size_t sz) {
 // May be larger than the requested size. The additional space can be used normally.
 static inline
 size_t alloc_size(const Allocator* a, const void* p) {
-	assert(a->flags & ALLOC_F_HAS_SIZE4);
+	assert(!a || a->flags & ALLOC_F_HAS_SIZE4);
 	return p ? ((uint32_t*)p)[-1] & ALLOC_SIZE_MASK : 0;
 }
 
