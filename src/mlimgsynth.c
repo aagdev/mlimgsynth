@@ -29,7 +29,7 @@
 
 #include <math.h>
 
-#define APP_NAME_VERSION "mlimgsynth v0.2.1"
+#define APP_NAME_VERSION "mlimgsynth v0.2.2"
 
 #define debug_pause() do { \
 	puts("Press ENTER to continue"); \
