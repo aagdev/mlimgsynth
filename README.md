@@ -1,6 +1,6 @@
 # MLImgSynth
 
-Generate images using Stable Diffusion (SD) models. This program is completely written in C and uses the [GGML](https://github.com/ggerganov/ggml/) library. It is largely based in [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp), but with a focus in more concise and clear code. Also, I put some care in the memory usage: at each step only the required weights will be loaded in the backend memory (e.g. VRAM). Moreover, with the option `--unet-split` it is possible to run SDXL models using only 4 GiB without quantization.
+Generate images using Stable Diffusion (SD) models. This program is completely written in C and uses the [GGML](https://github.com/ggerganov/ggml/) library. It is largely based in [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp), but with a focus in more concise and clear code. Also, I put some care in the memory usage: at each step only the required weights will be loaded in the backend memory (e.g. VRAM). Moreover, with the options `--unet-split` and `--vae-tile` it is possible to run SDXL models using only 4 GiB without quantization.
 
 ## Supported models
 
@@ -33,6 +33,8 @@ First, download the weights of the model you wish to use. Right now, the only su
 The option `-b` let's you select from the available backends (by default `CPU` is used).
 
 To start from an initial image (img2img) add the options `-i IMAGE.png` and `--f-t-ini 0.7`. The second option controls the strength by changing the initial time in the denoising process, you may try any value between 0 (no changes) and 1. 
+
+See the script `generate.sh` for a more complete example.
 
 Execute without any arguments to see a list of all the supported options.
 

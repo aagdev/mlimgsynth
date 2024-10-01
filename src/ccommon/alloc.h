@@ -12,26 +12,25 @@
 #include <assert.h>
 #include <stdlib.h>
 
-//TODO: modify vector.h to take advantage of size info
+//TODO: modify vector.h to take advantage of size info ?
+//TODO: compile option to use stdlib instead of the custom allocator
 
-// Round-up to the nearest power of two (up to 32 bits)
-static inline
-size_t size_round2(size_t v)
-{
-	v--;
-	v |= v >> 1;
-	v |= v >> 2;
-	v |= v >> 4;
-	v |= v >> 8;
-	v |= v >> 16;
-	v++;
-	return v;
-}
+#ifndef ALLOC_SIZE_ALIGNMENT
+#define ALLOC_SIZE_ALIGNMENT 16
+#endif
+
+#ifndef ALLOC_RESIZE_MARGIN
+#define ALLOC_RESIZE_MARGIN 4  //+6%
+#endif
+
+/* Allocator interface */
 
 typedef struct Allocator Allocator;
 struct Allocator {
 	// Allocation, reallocation and freeing of memory.
 	void * (*alloc)(Allocator* a, void* ptr, size_t sz, int flags);
+	// Free all associated memory (if possible).
+	void (*ctx_free)(Allocator* a);
 	// Handles fatal errors (out of memory). Can be NULL or user supplied.
 	void (*fatal)(const Allocator* a);
 	// Allocator context
@@ -59,9 +58,15 @@ static inline bool allocator_good(const Allocator* a) {
 	return !!a->alloc;
 }
 
+// Free all the memory associated with the allocator (if it corresponds).
+// May be a no-op.
+static inline void allocator_free(Allocator* a) {
+	if (a->ctx_free) a->ctx_free(a);
+}
+
 // This called to handle fatal errors (out of memory)
 static inline void alloc_fatal(const Allocator* a) {
-	a->fatal(a);
+	if (a->fatal) a->fatal(a);
 	abort();
 }
 
@@ -82,17 +87,23 @@ void * alloc_alloc(Allocator* a, size_t sz) {
 #define alloc_new(A, T, C) \
 	((T*)alloc_alloc((A), sizeof(T)*(C)))
 
-// Get the size of a block
-// May be larger than the requested size. The additional space can be used normally.
+/* Get the size of a block.
+ * May be larger than the requested size. The additional space can be used normally.
+ * Returns zero if not supported.
+ */
 static inline
 size_t alloc_size(const Allocator* a, const void* p) {
-	assert(!a || a->flags & ALLOC_F_HAS_SIZE4);
+	if (!(a && a->flags & ALLOC_F_HAS_SIZE4)) return 0; 
 	return p ? ((uint32_t*)p)[-1] & ALLOC_SIZE_MASK : 0;
 }
 
+/* Get the size of a block.
+ * Returns <def> if not known.
+ */
 static inline
 size_t alloc_size_opt(const Allocator* a, const void* p, size_t def) {
-	return a->flags & ALLOC_F_HAS_SIZE ? alloc_size(a, p) : def;
+	if (!(a && a->flags & ALLOC_F_HAS_SIZE4)) return def;
+	return alloc_size(a, p);
 }
 
 // Changes the size of a block
@@ -122,45 +133,39 @@ void alloc_free(Allocator* a, void* p) {
  */
 extern Allocator *g_allocator, *g_allocator_dopt;
 
-/* Custom general allocator with fast access to the block size.
- */
-void* alloc_gen_alloc(Allocator* a, void* ptr, size_t sz, int flags);
-
-static inline
-Allocator allocator_gen() {
-	return (Allocator){ &alloc_gen_alloc, NULL, NULL, ALLOC_F_HAS_SIZE4 };
-}
-
-// Reduces the memory used to a minimum
-void allocator_gen_trim(Allocator* a);
-
-// Return various summary statistics
-// The values are calculated on the spot, so it could be slow.
-typedef struct AllocGenInfo {
-	size_t		mtot,		// Total memory allocated from the system
-				mfree,		// Free memory
-				mfchunk;
-	unsigned	nseg,		// Number of segments
-				nchunk,		// Number of chunks
-				nchunkf,	// Number of free chunks
-				nfchunk;
-} AllocGenInfo;
-AllocGenInfo allocator_gen_info(Allocator* a);
-
 /* Standard library wrapper
  */
 #if __STDC_HOSTED__
 void* alloc_stdlib_alloc(Allocator* a, void* ptr, size_t sz, int flags);
 
-// Allocator for objects of fixed size
+/* Returns a wrapper allocator for stdlib.
+ */
 static inline
 Allocator allocator_stdlib() {
-	return (Allocator){ &alloc_stdlib_alloc, NULL, NULL, 0 };
+	return (Allocator){ alloc_stdlib_alloc, NULL, NULL, NULL, 0 };
 }
 
-// Allocator for efficient dynamic arrays
+/* Returns a wrapper allocator for stdlib.
+ * Optimized for efficient dynamic arrays (frequent reallocations).
+ */
 static inline
 Allocator allocator_stdlib_dopt() {
-	return (Allocator){ &alloc_stdlib_alloc, NULL, NULL, ALLOC_F_DOPTIMAL };
+	return (Allocator){ alloc_stdlib_alloc, NULL, NULL, NULL, ALLOC_F_DOPTIMAL };
 }
 #endif
+
+/* Utility */
+
+// Round-up to the nearest power of two (up to 32 bits)
+static inline
+size_t size_round2(size_t v)
+{
+	v--;
+	v |= v >> 1;
+	v |= v >> 2;
+	v |= v >> 4;
+	v |= v >> 8;
+	v |= v >> 16;
+	v++;
+	return v;
+}

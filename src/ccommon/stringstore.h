@@ -14,7 +14,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "strslice.h"
-#include "alloc_small.h"
+#include "alloc_arena.h"
 #include "vector.h"
 
 typedef int32_t StringInt;
@@ -22,7 +22,7 @@ typedef int32_t StringInt;
 typedef struct StringStore {
 	StrSlice * s;  //vector
 	unsigned * idx;  //index, vector
-	AllocatorSmall al;
+	AllocatorArena al;
 } StringStore;
 
 void strsto_free(StringStore* S);

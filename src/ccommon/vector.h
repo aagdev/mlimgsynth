@@ -174,7 +174,7 @@ typedef char* DynStr;
 
 // static allocation
 #define dstr_frombuffer(S,B) \
-	((char*)dynbuf_static(((S), (B), sizeof(char), 1))
+	((char*)dynbuf_static((S), (B), sizeof(char), 1))
 
 #define dstr_stack(C) \
 	((char*)dynbuf_static(((C)+1)*sizeof(char)+sizeof(DynBuf), \
@@ -334,6 +334,7 @@ DynBuf* dynbuf_realloc(void** pp, dynbuf_uint count, size_t tsize, unsigned flag
 
 	size_t nsz = size_round2( sizeof(DynBuf) + count * tsize );
 	obj = alloc_realloc(a, obj, nsz);
+	if (!obj) return NULL;
 
 	obj->capacity = (nsz - sizeof(DynBuf)) / tsize;
 	if (flags & DYNBUF_FLAG_ZERO_END) obj->capacity--;
@@ -358,8 +359,10 @@ DynBuf* dynbuf_resize(void** pp, dynbuf_uint count, size_t tsize, unsigned flags
 	DynBuf* obj = dynbuf_cast(*pp);
 
 	if (!obj && !count) return NULL;
-	if (!obj || (obj->capacity & DYNBUF_CAP_MASK) < count)
+	if (!obj || (obj->capacity & DYNBUF_CAP_MASK) < count) {
 		obj = dynbuf_realloc(pp, count, tsize, flags, a);
+		if (!obj) return NULL;
+	}
 
 	if (flags & DYNBUF_FLAG_ZERO_ALL)
 		memset(obj->d, 0, tsize*count);

@@ -75,13 +75,20 @@ int stio_read(StioStream* S, StioItem* itm, int flags)
 	return r;
 }
 
+int stio_read_chunk(StioStream* S, StioItem* itm)
+{
+	*itm = (StioItem){ .type=STIO_T_CHUNK,
+		.value={ .t=S->ctx->vtype, .len=stio__buf_sz(S), .p={.p=stio__buf_ptr(S)} } };
+	return stio_read(S, itm, STIO_RF_PASS_ITEM);
+}
+
 int stio_read_vector(StioStream* S, StioItem* itm,
 	AnyBaseType type, uint32_t n, void* dst)
 {
 	int r = stio_read(S, itm, STIO_RF_NO_DATA);
 	int itype = itm->type;
 	if (r == STIO_R_CTX_BEGIN) {
-		r = stio_read_chunk(S, itm, type, n, dst);
+		r = stio_read_chunk_buf(S, itm, type, n, dst);
 		if (r >= 0) itm->type = itype;  //TODO: check
 		if (r == STIO_R_CTX_END) r = STIO_R_OK;
 		else if (r == STIO_R_OK) r = STIO_R_CTX_BEGIN;
@@ -102,7 +109,7 @@ int stio_read_dyn(StioStream* S, StioItem* itm, AnyBaseType type, void** pdst,
 		unsigned cap = alloc_size(al, *pdst) / tsz;
 		unsigned i=0;
 		while (1) {
-			TRYR( r = stio_read_chunk(S, itm, type,
+			TRYR( r = stio_read_chunk_buf(S, itm, type,
 				cap-i, (char*)(*pdst)+tsz*i) );
 			i += itm->value.len;
 			if (r == STIO_R_CTX_END) break;

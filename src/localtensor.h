@@ -1,7 +1,7 @@
 /* Copyright 2024, Alejandro A. García <aag@zorzal.net>
  * SPDX-License-Identifier: MIT
  *
- * Simple storage for tensor.
+ * Simple storage for tensors.
  */
 #pragma once
 #include "ccommon/alloc.h"
@@ -9,8 +9,6 @@
 #include "ccommon/image.h"
 #include "ggml.h"
 #include "ggml-backend.h"
-
-//TODO: replace with general >ndarray> inspired by <vector>.
 
 typedef struct {
 	float* d;  //data
@@ -48,6 +46,36 @@ void ltensor_resize(LocalTensor* S, int n0, int n1, int n2, int n3) {
 static inline
 void ltensor_resize_like(LocalTensor* S, const LocalTensor* T) {
 	ltensor_resize(S, LT_SHAPE_UNPACK(*T));
+}
+
+static inline
+void ltensor_copy(LocalTensor* dst, const LocalTensor* src) {
+	ltensor_resize_like(dst, src);
+	memcpy(dst->d, src->d, ltensor_nbytes(dst));
+}
+
+/* Copy an slice of src into an slice of dst.
+ * n#: slice size en elements (#: 0-3 dimension)
+ * Li#: slice start (L: d=dst or s=src)
+ * Ls#: slice step (L: d=dst or s=src)
+ */
+void ltensor_copy_slice(LocalTensor* dst, const LocalTensor* src,
+	int n0 , int n1 , int n2 , int n3 ,
+	int di0, int di1, int di2, int di3,
+	int si0, int si1, int si2, int si3,
+	int ds0, int ds1, int ds2, int ds3,
+	int ss0, int ss1, int ss2, int ss3 );
+
+static inline
+void ltensor_copy_slice2(LocalTensor* dst, const LocalTensor* src,
+	int n0 , int n1 ,
+	int di0, int di1,
+	int si0, int si1,
+	int ds0, int ds1,
+	int ss0, int ss1 )
+{
+	ltensor_copy_slice(dst, src, n0,n1,src->s[2],src->s[3],
+		di0,di1,0,0, si0,si1,0,0, ds0,ds1,1,1, ss0,ss1,1,1);
 }
 
 static inline

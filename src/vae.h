@@ -47,7 +47,7 @@ void sdvae_decoder_post(LocalTensor* out, const LocalTensor* img)
 }
 
 int sdvae_encode(MLCtx* C, const VaeParams* P,
-	const LocalTensor* img, LocalTensor* latent);
+	const LocalTensor* img, LocalTensor* latent, int tile_px);
 
 int sdvae_decode(MLCtx* C, const VaeParams* P,
-	const LocalTensor* latent, LocalTensor* img);
+	const LocalTensor* latent, LocalTensor* img, int tile_px);

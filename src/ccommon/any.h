@@ -181,7 +181,7 @@ bool anys_cast(AnyScalar* a, AnyBaseType t) {
 
 bool anys_equal(const Any l, const Any r);
 
-long anys_tostr(const AnyScalar*restrict a, size_t n, char*restrict buffer);
+long anys_tostr(const AnyScalar *restrict a, size_t n, char *restrict buffer);
 
 /**
 @def any_TYPE(V)
@@ -262,6 +262,9 @@ DEF_ANYS_FUNCTIONS(AnyFloat64, float64, FLOAT64, f64)
 #define any_strings(S) \
 	((Any){ .t=ANY_T_STRING, .len=(S).s, .p={ .cp=(char*)(S).b } })
 
+#define any_string_dyn(C) \
+	((Any){ .t=ANY_T_STRING, .cls=(C) })
+
 #define any_vector(T,N,P) \
 	((Any){ .t=anyb_pointer_get(T), .len=(N), .p={ .p=(void*)(P) } })
 
@@ -308,6 +311,7 @@ bool any_identical_is(const Any* l, const Any* r) {
 	} else if (!l->len) {
 		return true;
 	} else if (l->p.p) {
+		if (!r->p.p) return false;
 		return !memcmp(l->p.p, r->p.p, any_size(l));
 	} else {
 		return !(r->p.p);
@@ -346,7 +350,9 @@ long any_tostr(const AnyScalar *restrict a, size_t n, char *restrict buffer);
  
 // Globally register an allocator.
 // Returns an id to use in Any.cls.
+// Returns zero in case of error.
 // If <at> != 0, then tries to use this id.
+// If <at> != 0 and <al> is already registered, returns its current position.
 unsigned any_allocator_register(Allocator* al, unsigned at);
 
 // Returns a registered allocator

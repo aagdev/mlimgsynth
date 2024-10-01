@@ -196,8 +196,12 @@ int stio_write_end(StioStream* S) {
 // Read
 int stio_read(StioStream* S, StioItem* itm, int flags);
 
+// Read the next chunk of data
+int stio_read_chunk(StioStream* S, StioItem* itm);
+
+// Read the next chunk of data into the provided buffer
 static inline
-int stio_read_chunk(StioStream* S, StioItem* itm,
+int stio_read_chunk_buf(StioStream* S, StioItem* itm,
 	AnyBaseType type, uint32_t n, void* dst)
 {
 	*itm = (StioItem){ .type=STIO_T_CHUNK,

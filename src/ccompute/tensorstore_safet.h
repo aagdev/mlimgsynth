@@ -6,6 +6,10 @@
 #pragma once
 #include "tensorstore.h"
 
-int safet_load_head(TensorStore*, Stream*, const char* prefix);
+extern const TensorStoreFormat ts_cls_safet;
 
-int safet_save_head(TensorStore*, Stream*, const char* prefix);
+int tstore_detect_safet(Stream* stm);
+
+int tstore_read_safet(TensorStore*, Stream*);
+
+int tstore_write_safet(TensorStore*, Stream*);

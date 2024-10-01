@@ -4,7 +4,7 @@
  * Utility to test the Philox RNG.
  */
 #include "ccommon/timing.h"
-#include "rng_philox.h"
+#include "ccommon/rng_philox.h"
 #include <stdlib.h>
 #include <stdio.h>
 

@@ -8,12 +8,13 @@
 #include "ccommon/stream.h"
 #include "ccommon/logging.h"
 #include "ccommon/stringstore.h"
+#include "ccompute/tensorstore.h"
+#include "localtensor.h"
+
 #include "ggml.h"
 #include "ggml-alloc.h"
 #include "ggml-backend.h"
 #include "ggml_extend.h"
-#include "tensorstore.h"
-#include "localtensor.h"
 
 //TODO: load: if CPU backend, do not copy tensor data
 //TODO: option: free compute, keep params in memory

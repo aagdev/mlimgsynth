@@ -3,12 +3,11 @@
  */
 #include "stringstore.h"
 #include "bisect.h"
-#include "alloc_small.h"
 
 /* */
 void strsto_free(StringStore* S)
 {
-	alloc_small_free(&S->al);
+	alloc_arena_free(&S->al);
 	vec_free(S->idx);
 	vec_free(S->s);
 }
@@ -80,7 +79,7 @@ StringInt strsto_add2(StringStore* S, const StrSlice ss, StringInt idx,
 			S->s[idx] = ss;
 		else {
 			// Copy string
-			char * p = alloc_small_alloc(&S->al, ss.s+1);
+			char * p = alloc_arena_alloc(&S->al, ss.s+1);
 			memcpy(p, ss.b, ss.s);
 			p[ss.s] = 0;
 			S->s[idx] = (StrSlice){ .b=p, .s=ss.s };

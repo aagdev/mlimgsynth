@@ -38,6 +38,7 @@ MLTensor* mlb_nn_conv2d(MLCtx* C, MLTensor* x,
 	int ch_in = x->ne[2];
 	// x: [N, ch_in, h, w]
 
+	//TODO: this works only with F16 for some reason
 	w = MLN("weight",
 		ggml_new_tensor_4d(C->cp, GGML_TYPE_F16, k0, k1, ch_in, ch_out));
     x = ggml_conv_2d(C->cc, w, x, s0,s1, p0,p1, d0,d1);

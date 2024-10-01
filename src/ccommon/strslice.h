@@ -12,12 +12,11 @@ typedef struct StrSlice {
 	size_t		s;
 } StrSlice;
 
+#define strsl_make(B,S) \
+	((StrSlice){ .b=(B), .s=(S) })
+
 #define strsl_static(S) \
 	((StrSlice){ .b=(S), .s=sizeof(S)-1 })
-
-static inline
-StrSlice strsl_fromz(const char* strz)
-	{ return (StrSlice){ .b=strz, .s=strlen(strz) }; }
 
 #define strsl_fromd(D) \
 	((StrSlice){ .b=(D), .s=dstr_count(D) })
@@ -25,8 +24,12 @@ StrSlice strsl_fromz(const char* strz)
 #define strsl_froma(A) \
 	((StrSlice){ .b=(A).p.cp, .s=(A).len })
 
-#define strsl_fromr(S,E) \
-	((StrSlice){ .b=(S), .s=(E)-(S) })
+#define strsl_fromr(B,E) \
+	((StrSlice){ .b=(B), .s=(E)-(B) })
+
+static inline
+StrSlice strsl_fromz(const char* strz)
+	{ return (StrSlice){ .b=strz, .s=strlen(strz) }; }
 
 static inline
 intptr_t strsl_len(const StrSlice ss)

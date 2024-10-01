@@ -7,6 +7,54 @@
 #include "ccommon/image_io.h"
 #include <string.h>
 
+void ltensor_copy_slice(LocalTensor* dst, const LocalTensor* src,
+	int n0 , int n1 , int n2 , int n3 ,
+	int di0, int di1, int di2, int di3,
+	int si0, int si1, int si2, int si3,
+	int ds0, int ds1, int ds2, int ds3,
+	int ss0, int ss1, int ss2, int ss3 )
+{
+	// Bound checks  //TODO: complete
+	assert( si0 + ss0 * n0 <= src->s[0] );
+	assert( si1 + ss1 * n1 <= src->s[1] );
+	assert( si2 + ss2 * n2 <= src->s[2] );
+	assert( si3 + ss3 * n3 <= src->s[3] );
+
+	assert( di0 + ds0 * n0 <= dst->s[0] );
+	assert( di1 + ds1 * n1 <= dst->s[1] );
+	assert( di2 + ds2 * n2 <= dst->s[2] );
+	assert( di3 + ds3 * n3 <= dst->s[3] );
+	
+	// Strides for contiguous tensors
+	int ss1c = src->s[0];
+	int ss2c = src->s[0] * src->s[1]; 
+	int ss3c = src->s[0] * src->s[1] * src->s[2]; 
+
+	int ds1c = dst->s[0];
+	int ds2c = dst->s[0] * dst->s[1]; 
+	int ds3c = dst->s[0] * dst->s[1] * dst->s[2]; 
+	
+	// Initial positions in memory
+	const float *sp = src->d +si0 +si1*ss1c +si2*ss2c +si3*ss3c;
+	float       *dp = dst->d +di0 +di1*ds1c +di2*ds2c +di3*ds3c;
+	
+	// Convert steps to strides
+	ss1 *= ss1c;
+	ss2 *= ss2c;
+	ss3 *= ss3c;
+	
+	ds1 *= ds1c;
+	ds2 *= ds2c;
+	ds3 *= ds3c;
+
+	// Set
+	for (int i3=0; i3<n3; ++i3)
+	for (int i2=0; i2<n2; ++i2)
+	for (int i1=0; i1<n1; ++i1)
+	for (int i0=0; i0<n0; ++i0)
+		dp[i0*ds0 +i1*ds1 +i2*ds2 +i3*ds3] = sp[i0*ss0 +i1*ss1 +i2*ss2 +i3*ss3];
+}
+
 float ltensor_minmax(const LocalTensor* S, float* min)
 {
 	float mn=S->d[0], mx=mn;

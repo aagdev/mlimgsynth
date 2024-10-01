@@ -21,6 +21,8 @@ enum LoggingLevel {
 	LOG_LVL_INFO2	= LOG_LVL_STEP*4, //verbose
 	LOG_LVL_DEBUG	= LOG_LVL_STEP*5,
 	LOG_LVL_DEBUG2	= LOG_LVL_STEP*6,
+	LOG_LVL_DEBUG3	= LOG_LVL_STEP*7,
+	LOG_LVL_DEBUG4	= LOG_LVL_STEP*8,
 	LOG_LVL_MAX		= 255
 };
 
@@ -31,6 +33,8 @@ enum LoggingLevel {
 #define log_info2(...)		log_log(LOG_LVL_INFO2, __VA_ARGS__)
 #define log_debug(...)		log_log(LOG_LVL_DEBUG, __VA_ARGS__)
 #define log_debug2(...)		log_log(LOG_LVL_DEBUG2, __VA_ARGS__)
+#define log_debug3(...)		log_log(LOG_LVL_DEBUG3, __VA_ARGS__)
+#define log_debug4(...)		log_log(LOG_LVL_DEBUG4, __VA_ARGS__)
 
 #define log_log(LVL, ...) do {\
 	if (log_level_check((LVL))) \
@@ -84,9 +88,16 @@ __attribute__((format(printf, 2, 3)))
 #endif
 void log_logf(int level, const char format[], ...);
 
-// Low level interface, no checking
-//TODO: join line_begin and level_check
-void log_line_begin(int level);
+
+// Low level interface
+void log_line_begin_raw(int level);  //no checking
+
+static inline
+bool log_line_begin(int level) {
+	if (!log_level_check(level)) return false;
+	log_line_begin_raw(level);
+	return true;
+}
 
 void log_line_str(const char* str);
 

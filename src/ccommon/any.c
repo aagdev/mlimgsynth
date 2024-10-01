@@ -182,6 +182,7 @@ bool any_equal(const Any* l, const Any* r)
 	assert(ANY_T_FLOAT64 < l->t && l->t <= ANY_T_LAST);
 	if (!(l->t == r->t && l->len == r->len)) return false;
 	if (l->p.p == NULL) return r->p.p == NULL;
+	if (r->p.p == NULL) return false;
 	return !memcmp(l->p.p, r->p.p, any_size(l));
 }
 
@@ -211,7 +212,7 @@ long anys_tostr(const AnyScalar *restrict a, size_t n, char *restrict buf)
 }
 #endif
 
-long any_tostr(const AnyScalar*restrict a, size_t n, char*restrict buf)
+long any_tostr(const AnyScalar *restrict a, size_t n, char *restrict buf)
 {
 	if (n < 1) return 0;
 	char *cur=buf, *end=cur+n-1;
@@ -252,10 +253,13 @@ unsigned any_allocator_register(Allocator* al, unsigned at)
 {
 	if (!at) {
 		at++;
-		while (at < ANY_ALLOCATORS_MAX && g_allocators[at]) at++;
+		while (at < ANY_ALLOCATORS_MAX && g_allocators[at]) {
+			if (g_allocators[at] == al) return at;
+			at++;
+		}
 	}
 	if (at >= ANY_ALLOCATORS_MAX) return 0;
-	if (g_allocators[at]) return 0;
+	if (g_allocators[at] && g_allocators[at] != al) return 0;
 	g_allocators[at] = al;
 	return at;
 }
@@ -278,6 +282,7 @@ void any_array_elements_free(Any* ap, uint32_t i, uint32_t iE) {
 void any_free(Any* a)
 {
 	Allocator * al = g_allocators[a->cls];
+	if (!al) return;
 	if (a->t == ANY_T_MAP) {
 		any_map_elements_free(a->p.app, 0, a->len);
 		alloc_free(al, a->p.p);
@@ -294,6 +299,7 @@ void any_free(Any* a)
 bool any_realloc(Any* a, uint32_t len)
 {
 	Allocator * al = g_allocators[a->cls];
+	if (!al) return false;
 	if (a->t == ANY_T_MAP) {
 		if (len < a->len)
 			any_map_elements_free(a->p.app, len, a->len);

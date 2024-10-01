@@ -1,15 +1,15 @@
 # Makefile
-targets = rng-test st-util mlimgsynth
+targets = test_rng tstore-util mlimgsynth
+
+# Put your custom definitions in Makefile.local instead of changing this file
+-include Makefile.local
 
 include src/ccommon/base.mk
-VPATH = src:src/ccommon
+VPATH = src:src/ccommon:src/ccompute
 cppflags += -Isrc
 ldlibs += -lm
 
 ### Dependencies
-# ccommon
-common = timing.o alloc.o stream.o logging.o alloc_small.o stringstore.o fsutil.o \
-	any.o structio.o structio_json.o image.o image_io.o image_io_pnm.o
 
 # ggml
 ifndef GGML_INCLUDE_PATH
@@ -17,6 +17,7 @@ GGML_INCLUDE_PATH := ggml/include
 endif
 ifndef GGML_LIB_PATH
 #GGML_LIB_PATH := ggml/Debug/src
+#GGML_LIB_PATH := ggml/RelWithDebInfo/src
 GGML_LIB_PATH := ggml/Release/src
 endif
 cppflags += -I$(GGML_INCLUDE_PATH)
@@ -48,11 +49,22 @@ mlimgsynth: cppflags += -DUSE_LIB_JPEG
 mlimgsynth: image_io_jpeg.o
 endif
 
+### Module dependencies
+tensorstore.o: cppflags += -DTENSORSTORE_USE_GGML -DTENSORSTORE_FMT_GGUF \
+	-DTENSORSTORE_FMT_SAFET
+
+# ccommon
+common = timing.o alloc.o alloc_gen.o stream.o logging.o \
+	alloc_arena.o stringstore.o fsutil.o \
+	any.o structio.o structio_json.o image.o image_io.o image_io_pnm.o
+
 ### Binary targets
-rng-test: $(common) rng_philox.o rng-test.o
+test_rng: $(common) rng_philox.o test_rng.o
 
-st-util: $(common) tensorstore.o safetensors.o st-util.o
+tstore-util: $(common) tensorstore.o tensorstore_safet.o tensorstore_gguf.o \
+	main_tstore_util.o
 
-mlimgsynth: $(common) localtensor.o tensorstore.o safetensors.o \
-	ggml_extend.o mlblock.o mlblock_nn.o rng_philox.o tae.o vae.o clip.o unet.o \
-	solvers.o util.o mlimgsynth.o
+mlimgsynth: $(common) rng_philox.o localtensor.o \
+	tensorstore.o tensorstore_safet.o tensorstore_gguf.o \
+	ggml_extend.o mlblock.o mlblock_nn.o tae.o vae.o clip.o unet.o \
+	solvers.o util.o main_mlimgsynth.o

@@ -2,9 +2,10 @@
  * SPDX-License-Identifier: MIT
  */
 #include "vae.h"
-#include "rng_philox.h"
 #include "ccommon/ccommon.h"
+#include "ccommon/timing.h"
 #include "ccommon/logging.h"
+#include "ccommon/rng_philox.h"
 #include "ggml_extend.h"
 #include "mlblock_nn.h"
 #include <stdlib.h>
@@ -216,7 +217,7 @@ void sdvae_latent_sample(LocalTensor* latent, const LocalTensor* mom,
 }
 
 int sdvae_encode(MLCtx* C, const VaeParams* P,
-	const LocalTensor* img, LocalTensor* latent)
+	const LocalTensor* img, LocalTensor* latent, int tile_px)
 {
 	int R=1;
 	
@@ -245,31 +246,94 @@ end:
 }
 
 int sdvae_decode(MLCtx* C, const VaeParams* P,
-	const LocalTensor* latent, LocalTensor* img)
+	const LocalTensor* latent, LocalTensor* img, int tile_px)
 {
 	int R=1;
 	MLCtx ctx={0};
+	LocalTensor ltmp={0}, itmp={0};
 
 	TRY( ltensor_shape_check_log(latent, "latent", 0,0,4,1) );
+	int lat_n0 = latent->s[0],  ln0 = lat_n0,
+		lat_n1 = latent->s[1],  ln1 = lat_n1;
 	
+	if (tile_px > 0) {
+		tile_px = ((tile_px + 63) / 64) * 64;  //rounding up
+		//+2 = overlap to prevent border effects
+		ln0 = ccMIN( tile_px/8+2, lat_n0 );  
+		ln1 = ccMIN( tile_px/8+2, lat_n1 );
+		if (ln0 == lat_n0 && ln1 == lat_n1)  //one tile
+			tile_px = 0;  //disable
+	};
+
 	// Prepare computation
+	C->c.multi_compute = (tile_px > 0);
 	mlctx_begin(C, "VAE decode");
-	MLTensor *input = mlctx_input_new(C, "latent", GGML_TYPE_F32,
-		LT_SHAPE_UNPACK(*latent));
+	MLTensor *input = mlctx_input_new(C, "latent", GGML_TYPE_F32, ln0, ln1, 4, 1);
 	MLTensor *output = mlb_sdvae_decoder(C, input, P);
 	TRY( mlctx_prep(C) );
 
-	// Set input
-	ltensor_to_backend(latent, input);
+	if (tile_px > 0) {
+		double t = timing_time();
+		int f = P->f_down,  //latent to image scale (8 for SD)
+		    img_n0  = lat_n0 * f,
+		    img_n1  = lat_n1 * f,
+			lstep0  = ln0 - 2,  //overlapping
+			lstep1  = ln1 - 2,
+			n_tile0 = (lat_n0 + lstep0 - 1) / lstep0,
+			n_tile1 = (lat_n1 + lstep1 - 1) / lstep1,
+			n_tile  = n_tile0 * n_tile1,
+			i_tile  = 0;
+		
+		log_debug("VAE decode tiling: size:%d,%d step:%d,%d",
+			ln0,ln1, lstep0,lstep1);
+		
+		// Temporal image tensor in case latent == img
+		ltensor_resize(&itmp, img_n0, img_n1, 3, 1);
 
-	// Compute
-	TRY( mlctx_compute(C) );
 
-	// Get output
-	ltensor_from_backend(img, output);
-	sdvae_decoder_post(img, img);
+		for (int t1=0; t1<n_tile1; ++t1) {
+			int i1 = ccMIN(t1 * lstep1, lat_n1 - ln1);
+			for (int t0=0; t0<n_tile0; ++t0, ++i_tile) {
+				int i0 = ccMIN(t0 * lstep0, lat_n0 - ln0);
+
+				log_info("VAE tile %d/%d", i_tile+1, n_tile);
+
+				ltensor_resize(&ltmp, ln0, ln1, 4, 1);
+				ltensor_copy_slice2(&ltmp, latent, ln0,ln1, 0,0, i0,i1, 1,1, 1,1);
+
+				ltensor_to_backend(&ltmp, input);
+				if (i_tile > 0) C->c.quiet = true;
+				TRY( mlctx_compute(C) );
+				ltensor_from_backend(&ltmp, output);
+				sdvae_decoder_post(&ltmp, &ltmp);
+				
+				int d0 = i0 ? f : 0,
+				    d1 = i1 ? f : 0;
+				ltensor_copy_slice2(&itmp, &ltmp, (ln0-1)*f, (ln1-1)*f,
+					i0*f+d0,i1*f+d1, d0,d1, 1,1, 1,1);
+			}
+		}
+
+		ltensor_copy(img, &itmp);
+		t = timing_time() - t;
+		log_info("VAE decode done {%.3fs}", t);
+	}
+	else {
+		// Set input
+		ltensor_to_backend(latent, input);
+
+		// Compute
+		TRY( mlctx_compute(C) );
+
+		// Get output
+		ltensor_from_backend(img, output);
+		sdvae_decoder_post(img, img);
+	}
 
 end:
+	C->c.quiet = false;
+	ltensor_free(&ltmp);
+	ltensor_free(&itmp);
 	mlctx_free(&ctx);
 	return R;
 }

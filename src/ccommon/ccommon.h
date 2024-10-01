@@ -33,8 +33,10 @@
 
 #define SIGNg(X)		((X) < 0 ? -1 : (X) > 0 ? 1 : 0)
 #define ABSg(X)			((X)<0 ? -(X) : (X))
-#define MINg(X,Y)		((X)<(Y) ? (X) : (Y))
-#define MAXg(X,Y)		((X)>(Y) ? (X) : (Y))
+#define ccMIN(X,Y)		((X)<(Y) ? (X) : (Y))
+#define ccMAX(X,Y)		((X)>(Y) ? (X) : (Y))
+#define MINg ccMIN  //deprecated
+#define MAXg ccMAX  //deprecated
 #define MIN3(A,B,C)		MINg(MINg(A,B),C)
 #define MAX3(A,B,C)		MAXg(MAXg(A,B),C)
 #define LIMITg(V,L,H)	((V) < (L) ? (V) = (L) : (V) > (H) ? (V) = (H) : (V))
@@ -59,6 +61,8 @@
 #define ARRAY_ZERO(D, C)		memset((D), 0, sizeof(*(D))*(C))
 #define ARRAY_COPY(D, S, C)		memcpy((D), (S), sizeof(*(D))*(C))
 #define ARRAY_CMP(D, S, C)		memcmp((D), (S), sizeof(*(D))*(C))
+
+#define ccUNUSED(x) (void)(x)
 	
 #ifndef M_PI
 #define M_PI  3.14159265358979323846
@@ -106,23 +110,26 @@ typedef int result_t;
 	if (_R_ < 0) return _R_; \
 } while (0)
 
-#define TRYB(CODE, EXPR) \
-	TRY( (EXPR) ? 1 : (CODE) )
+#define TRYB(CODE, EXPR) do { \
+	if (!(EXPR)) RETURN(CODE); \
+} while (0)
 
-#define TRYRB(CODE, EXPR) \
-	TRYR( (EXPR) ? 1 : (CODE) )
+#define TRYRB(CODE, EXPR) do { \
+	if (!(EXPR)) return (CODE); \
+} while (0)
 
 #define TRY_LOG(EXPR, ...) do { \
 	result_t _R_ = (EXPR); \
 	if (_R_ < 0) ERROR_LOG(_R_, __VA_ARGS__); \
 } while (0)
 
-/*#ifndef ERROR_E_MEM
-#define ERROR_E_MEM -2
-#endif
+#define TRY_ASSERT(EXPR) do { \
+	result_t _R_ = (EXPR); \
+	if (_R_ < 0) ERROR_LOG(_R_, "Error 0x%x in %s:%d:\n%s", \
+		-_R_, __FILE__, __LINE__, #EXPR); \
+} while (0)
 
-#define TRYMEM(EXPR) \
-	TRY( (EXPR) ? 1 : ERROR_E_MEM )
-
-#define TRYRMEM(EXPR) \
-	TRYR( (EXPR) ? 1 : ERROR_E_MEM ) */
+#define TRYB_ASSERT(CODE, EXPR) do { \
+	if (!(EXPR)) ERROR_LOG((CODE), "Assertion Error %s:%d:\n%s", \
+		__FILE__, __LINE__, #EXPR); \
+} while (0)

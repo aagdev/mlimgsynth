@@ -348,8 +348,19 @@ int stream_write_prep(Stream* S, size_t nbytes)
 
 int stream_flush(Stream* S)
 {
-	if (S->cls->write)
-		TRYR( stream_write_buffer_flush(S) );
+	if (S->flags & SF_MODE_WRITE) {
+		if (S->cls->write)
+			TRYR( stream_write_buffer_flush(S) );
+	} else {
+		if (S->cls->read)
+			TRYR( stream_read_buffer_discard(S) );
+	}
+	return 0;
+}
+
+int stream_sync(Stream* S)
+{
+	TRYR( stream_flush(S) );
 	if (S->cls->flush) {
 		DebugLog("flush");
 		TRYR( S->cls->flush(S->internal) );

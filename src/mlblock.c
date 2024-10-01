@@ -217,6 +217,8 @@ int mlctx_build_alloc(MLCtx* C, MLTensor* result)
 	return 1;
 }
 
+#define TSTDG_R_CONVERT  2
+
 int tstore_tensor_read(TSTensorEntry* S, struct ggml_tensor* t)
 {
 	int R=1;
@@ -243,6 +245,8 @@ int tstore_tensor_read(TSTensorEntry* S, struct ggml_tensor* t)
 	TRY( R = tstore_tensor_data_get(S, target, 0, &td) );
 	ggml_backend_tensor_set(t, td.data, 0, td.size);
 	tstore_tdata_free(&td);
+
+	if (target != S->dtype) R = TSTDG_R_CONVERT;
 
 end:
 	return R;

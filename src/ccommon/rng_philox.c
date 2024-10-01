@@ -1,5 +1,5 @@
 /* Copyright 2024, Alejandro A. García <aag@zorzal.net>
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: Zlib
  */
 #include "rng_philox.h"
 #include <math.h>

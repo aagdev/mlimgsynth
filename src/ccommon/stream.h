@@ -92,7 +92,7 @@ typedef struct StreamClass {
 	long (*write)(void*restrict, const void*restrict, size_t);
 	int (*close)(void*);
 	int64_t (*seek)(void*, int64_t, int);
-	int (*flush)(void*);
+	int (*flush)(void*);  //fsync
 	const char * name;
 } StreamClass;
 
@@ -128,22 +128,16 @@ int stream_open_memory(Stream*restrict S, void*restrict buffer, size_t size,
  */
 int stream_close(Stream* S, int flags);
 
-/* Returns a buffer from where at least nbytes can be read.
- *
- * If nbytes is zero, at least half the internal buffer will be ready
- * or less if the stream ends before.
- * Returns NULL if the requested amount can not be read.
- * Use stream_buffer_size to get the buffer size.
+/* Returns a buffer from where data can be read.
+ * Returns NULL if no data can be read.
  * Use stream_commit to advance the stream cursor.
  */
 static inline
 void* stream_read_buffer_(Stream* S, void** end);
 #define stream_read_buffer(S,E)  stream_read_buffer_((S), (void**)(E))
 
-/* Returns a buffer of at least nbytes to write to the stream.
- *
- * If nbytes is zero, at least half the internal buffer will be available.
- * Use stream_buffer_size to get the buffer size.
+/* Returns a buffer to where data can be written.
+ * Returns NULL if no data can be written.
  * Use stream_commit to advance the stream cursor.
  */
 static inline
@@ -188,9 +182,16 @@ void* stream_buffer_get_(Stream* S, void** end);
 static inline
 void stream_commit(Stream*restrict S, const void*restrict cursor);
 
-/* Forces writting the buffer to the underling support.
+/* Flushes the internal buffers.
+ * In write mode, Sends any pending writes to the OS.
+ * In read mode, discards any data cached.
  */
 int stream_flush(Stream* S);
+
+/* Forces writting the buffer to the underling support (i.e. disk).
+ * Implies a flush.
+ */
+int stream_sync(Stream* S);
 
 /* Reads and get a buffer with nbytes.
  * Advances the cursor.

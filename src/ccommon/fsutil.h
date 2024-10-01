@@ -12,10 +12,15 @@
 static inline
 char* path_tail(const char* path);
 
-// Returns the file name extension.
+// Returns the file name extension without the dot.
 // Examples: "dir/name.ext" -> "ext", "name" -> "" (pointer to end)
 static inline
 char* path_ext(const char* path);
+
+// Returns the file name extension with the dot.
+// Examples: "dir/name.ext" -> ".ext", "name" -> "" (pointer to end)
+static inline
+char* path_extdot(const char* path);
 
 static inline
 bool path_abs_is(const char* path);
@@ -53,6 +58,14 @@ char* path_ext(const char* path)
 {
 	int n = strlen(path);
 	for (int i=n-1; i>=0; --i) if (path[i] == '.') return (char*)(path+i+1);
+	return (char*)path+n;  //empty
+}
+
+static inline
+char* path_extdot(const char* path)
+{
+	int n = strlen(path);
+	for (int i=n-1; i>=0; --i) if (path[i] == '.') return (char*)(path+i);
 	return (char*)path+n;  //empty
 }
 

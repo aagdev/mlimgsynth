@@ -110,7 +110,7 @@ ifdef gdb
 endif
 
 $(objdir):
-	mkdir $(objdir)
+	mkdir -p $(objdir)
 
 %.o: $(objdir)/%.o ;
 
@@ -132,7 +132,7 @@ endif
 
 ###
 $(depdir):
-	mkdir $(depdir)
+	mkdir -p $(depdir)
 
 $(depdir)/%.d: ;
 

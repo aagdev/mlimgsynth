@@ -7,11 +7,10 @@
 #include "ccommon/logging.h"
 #include "ccommon/stream.h"
 #include "ccommon/fsutil.h"
+#include "ccommon/rng_philox.h"
+#include "ccompute/tensorstore.h"
 
-#include "tensorstore.h"
-#include "safetensors.h"
 #include "localtensor.h"
-#include "rng_philox.h"
 #include "tae.h"
 #include "vae.h"
 #include "clip.h"
@@ -29,7 +28,7 @@
 
 #include <math.h>
 
-#define APP_NAME_VERSION "mlimgsynth v0.2.2"
+#define APP_NAME_VERSION "mlimgsynth v0.2.4"
 
 #define debug_pause() do { \
 	puts("Press ENTER to continue"); \
@@ -104,6 +103,10 @@ const char help_string[] =
 	"  --f-t-end FLOAT    End time factor (default 0).\n"
 	"  --tae PATH         Enables TAE and sets path to tensors.\n"
 	"  --unet-split       Split each unet compute step compute in two parts to reduce memory usage.\n"
+	"  --vae-tile INT     Encode and decode images using tiles of NxN pixels.\n"
+	"                     Reduces memory usage. On doubt, try 512."
+	//"  --type NAME        Convert the weight to this tensor type.\n"
+	//"                     Useful to quantize and reduce RAM usage (try q8_0).\n"
 	"  --dump             Dumps models tensors and graphs.\n"
 	"\n"
 	"  -q                 Quiet: reduces information output.\n"
@@ -115,7 +118,7 @@ const char help_string[] =
 
 typedef struct {
 	MLCtx ctx;
-	TensorStore tstore;
+	TensorStore tstore, tstore_tae;
 	Stream stm_model, stm_tae;
 	ClipTokenizer tokr;
 
@@ -129,7 +132,8 @@ typedef struct {
 	struct {
 		const char *path_model, *path_in, *path_in2, *path_out, *path_tae,
 			*backend, *prompt, *nprompt;
-		int cmd, n_thread, n_step, width, height, seed, method, sched, clip_skip;
+		int cmd, n_thread, n_step, width, height, seed, method, sched, clip_skip,
+			vae_tile;
 		float s_noise, f_t_ini, f_t_end, cfg_scale;
 		unsigned dump_info:1, use_tae:1, use_cfg:1, unet_split:1;
 	} c;
@@ -137,10 +141,12 @@ typedef struct {
 
 int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 {
-	if (argc <= 1) {
-		puts(help_string);
-		return 1;
-	}
+	int R=1;
+
+	if (argc <= 1) RETURN(0);
+
+	// Defaults
+	S->ctx.c.wtype = GGML_TYPE_F16;
 
 	//TODO: validate input ranges
 
@@ -184,16 +190,25 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 			else if (!strcmp(arg+2, "unet-split" )) {
 				S->c.unet_split = true;
 			}
+			else if (!strcmp(arg+2, "vae-tile" )) {
+				S->c.vae_tile = atoi(next);  i++;
+			}
+			//TODO: using other types is not working well right now
+			/*else if (!strcmp(arg+2, "type" )) {
+				i++;
+				int dt = tstore_dtype_fromz(next);
+				if (!(dt > 0))
+					ERROR_LOG(-1, "unknown tensor type '%s'", next);				
+				S->ctx.c.wtype = tstore_dtype_attr(dt)->ggml;
+			}*/
 			else if (!strcmp(arg+2, "dump" )) {
 				S->c.dump_info = true;
 			}
 			else if (!strcmp(arg+2, "version" )) {
-				puts(version_string);
-				return 1;
+				RETURN(0);
 			}
 			else {
-				log_error("Unknown option '%s'", arg);
-				return 1;
+				ERROR_LOG(-1, "Unknown option '%s'", arg);
 			}
 		}
 		else
@@ -217,12 +232,9 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 				case 'q':  log_level_inc(-LOG_LVL_STEP); break;
 				case 'v':  log_level_inc(+LOG_LVL_STEP); break;
 				case 'd':  log_level_set(LOG_LVL_DEBUG); break;
-				case 'h':
-					puts(help_string);
-					return 1;
+				case 'h':  RETURN(0);
 				default:
-					log_error("Unknown option '-%c'", opt);
-					return 1;
+					ERROR_LOG(-1, "Unknown option '-%c'", opt);
 				}
 			}
 		}
@@ -230,8 +242,7 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 			S->c.cmd = id_fromz(arg);
 		}
 		else {
-			log_error("Excess of arguments");
-			return 1;
+			ERROR_LOG(-1, "Excess of arguments");
 		}
 	}
 	
@@ -246,7 +257,12 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 		}
 	}
 
-	return 0;
+	if (!g_rng.seed) g_rng.seed = timing_timeofday();
+	log_debug("Seed: %zu", g_rng.seed);
+
+end:
+	if (R==0) puts(help_string);
+	return R;
 }
 
 void mlis_free(MLImgSynthApp* S)
@@ -256,6 +272,7 @@ void mlis_free(MLImgSynthApp* S)
 	mlctx_free(&S->ctx);
 	clip_tokr_free(&S->tokr);
 	stream_close(&S->stm_tae, 0);
+	tstore_free(&S->tstore_tae);
 	tstore_free(&S->tstore);
 	stream_close(&S->stm_model, 0);
 	if (S->ctx.backend)
@@ -328,51 +345,6 @@ const TSNameConvEntry g_tensor_name_conv[] = {
 	{}, //end mark
 };
 
-#define TNC_match(PREFIX, REPLACE) \
-	dstr_prefix_replace(*name, (PREFIX), (REPLACE), &pos)
-
-/*static
-int tname_conv(void*, DynStr* name)
-{
-	unsigned pos=0;
-	if (TNC_match("cond_stage_model.", "clip.")) {
-		if (TNC_match("transformer.text_model.", "text.")) ;
-		//SD2
-		else if (TNC_match("model.", "text."))
-			TRY( tname_conv_oclip(*name, &pos) );
-	}
-	else if () {
-	{"first_stage_model.", "vae."},
-	{"model.diffusion_model.", "unet.", .sub=TSNCSub{
-		{"input_blocks.", .skip_until='.', .sub=TSNCSub{
-			{.skip_until='.', .sub=TSNCSub{
-				{"transformer_blocks.", .skip_until='.', .sub=TSNCSub{
-					{"attn", .skip_until='.', .sub=TSNCSub{
-						{"to_q.", "q_proj."},
-						{"to_k.", "k_proj."},
-						{"to_v.", "v_proj."},
-						{"to_out.", "out_proj."},
-						{}, //end mark
-					}},
-					{}, //end mark
-				}},
-				{}, //end mark
-			}},
-			{}, //end mark
-		}},
-		{}, //end mark
-	}},
-
-	//SDXL
-	{"conditioner.embedders.0.", "clip.", .sub=TSNCSub{
-		{"transformer.text_model.", "text."},
-		{}, //end mark
-	}},
-	{"conditioner.embedders.1.model.", "clip2.text.", .sub=g_tnconv_oclip},
-	{}, //end mark
-	}
-}*/
-
 int dstr_replace(DynStr* s, const char* p, const char* r)
 {
 	if (!p || !p[0]) return 0;
@@ -408,7 +380,7 @@ int dstr_replace(DynStr* s, const char* p, const char* r)
 }
 
 static
-int tname_conv(void* p, DynStr* name)
+int tensor_name_convert(DynStr* name)
 {
 	const TSNameConvEntry *conv=g_tensor_name_conv, *conv_next;
 	unsigned icur=0;
@@ -464,82 +436,105 @@ int tname_conv(void* p, DynStr* name)
 }
 
 static
-int open_clip_attn_conv(TensorStore* ts)
+int open_clip_attn_conv(TensorStore* ts, const TSTensorEntry *e,
+	const DynStr name)
 {
 	int R=1;
 	DynStr tmps=NULL;
 	TSTensorEntry new={0};
+	unsigned nlen = dstr_count(name);
 
-	vec_for(ts->tensors,i,0) {
-		const TSTensorEntry *e = &ts->tensors[i];
-		const char *name = id_str(e->key);
-		unsigned nlen = strlen(name);
-		if (nlen >= 20 && !memcmp(name, "clip", 4) &&
-			(name[4] == '.' || (name[4] == '2' && name[5] == '.')) )
+	if (nlen >= 20 && !memcmp(name, "clip", 4) &&
+		(name[4] == '.' || (name[4] == '2' && name[5] == '.')) )
+	{
+		if (!memcmp(name+nlen-18, ".attn.in_proj_bias", 18))
 		{
-			if (!memcmp(name+nlen-18, ".attn.in_proj_bias", 18))
-			{
-				if (!(e->shape_n==1 && e->shape[0] % 3 == 0))
-					ERROR_LOG(-1, "invalid open_clip tensor '%s'", name);
-				new = *e;
-				new.shape[0] /= 3;
-				new.size /= 3;
-				nlen -= 18;
-				
-				dstr_copy(tmps, nlen, name);
-				dstr_appendz(tmps, ".self_attn.q_proj.bias");
-				tstore_tensor_add(ts, &tmps, &new);
-				new.offset += new.size;
-				
-				dstr_copy(tmps, nlen, name);
-				dstr_appendz(tmps, ".self_attn.k_proj.bias");
-				tstore_tensor_add(ts, &tmps, &new);
-				new.offset += new.size;
-				
-				dstr_copy(tmps, nlen, name);
-				dstr_appendz(tmps, ".self_attn.v_proj.bias");
-				tstore_tensor_add(ts, &tmps, &new);
-			}
-			else if (!memcmp(name+nlen-20, ".attn.in_proj_weight", 20))
-			{
-				if (!(e->shape_n==2 && e->shape[1] % 3 == 0))
-					ERROR_LOG(-1, "invalid open_clip tensor '%s'", name);
-				new = *e;
-				new.shape[1] /= 3;
-				new.size /= 3;
-				nlen -= 20;
-				
-				dstr_copy(tmps, nlen, name);
-				dstr_appendz(tmps, ".self_attn.q_proj.weight");
-				tstore_tensor_add(ts, &tmps, &new);
-				new.offset += new.size;
-				
-				dstr_copy(tmps, nlen, name);
-				dstr_appendz(tmps, ".self_attn.k_proj.weight");
-				tstore_tensor_add(ts, &tmps, &new);
-				new.offset += new.size;
-				
-				dstr_copy(tmps, nlen, name);
-				dstr_appendz(tmps, ".self_attn.v_proj.weight");
-				tstore_tensor_add(ts, &tmps, &new);
-			}
+			if (!(e->shape_n==1 && e->shape[0] % 3 == 0))
+				ERROR_LOG(-1, "invalid open_clip tensor '%s'", name);
+			new = *e;
+			new.shape[0] /= 3;
+			new.size /= 3;
+			nlen -= 18;
+			
+			dstr_copy(tmps, nlen, name);
+			dstr_appendz(tmps, ".self_attn.q_proj.bias");
+			tstore_tensor_add(ts, tmps, &new);
+			new.offset += new.size;
+			
+			dstr_copy(tmps, nlen, name);
+			dstr_appendz(tmps, ".self_attn.k_proj.bias");
+			tstore_tensor_add(ts, tmps, &new);
+			new.offset += new.size;
+			
+			dstr_copy(tmps, nlen, name);
+			dstr_appendz(tmps, ".self_attn.v_proj.bias");
+			tstore_tensor_add(ts, tmps, &new);
+		}
+		else if (!memcmp(name+nlen-20, ".attn.in_proj_weight", 20))
+		{
+			if (!(e->shape_n==2 && e->shape[1] % 3 == 0))
+				ERROR_LOG(-1, "invalid open_clip tensor '%s'", name);
+			new = *e;
+			new.shape[1] /= 3;
+			new.size /= 3;
+			nlen -= 20;
+			
+			dstr_copy(tmps, nlen, name);
+			dstr_appendz(tmps, ".self_attn.q_proj.weight");
+			tstore_tensor_add(ts, tmps, &new);
+			new.offset += new.size;
+			
+			dstr_copy(tmps, nlen, name);
+			dstr_appendz(tmps, ".self_attn.k_proj.weight");
+			tstore_tensor_add(ts, tmps, &new);
+			new.offset += new.size;
+			
+			dstr_copy(tmps, nlen, name);
+			dstr_appendz(tmps, ".self_attn.v_proj.weight");
+			tstore_tensor_add(ts, tmps, &new);
 		}
 	}
 
 end:
-	dstr_free(tmps);
+	return R;
+}
+
+static
+int mlis_tstore_normalize(TensorStore* ts)
+{
+	int R=1;
+	DynStr name=NULL;
+
+	vec_for(ts->tensors,i,0) {
+		TSTensorEntry *e = &ts->tensors[i];
+
+		// Rename tensors to uniform names
+		dstr_copyz(name, id_str(e->key));
+		TRY( tensor_name_convert(&name) );
+		e->key = id_fromz(name);
+
+		// Convert from openclip attention projection in one tensor
+		// to three tensors.
+		TRY( open_clip_attn_conv(ts, e, name) );
+	}
+
+	TRY( tstore_tensor_index_remake(ts) );
+
+end:
+	dstr_free(name);
 	return R;
 }
 
 int mlis_ml_init(MLImgSynthApp* S)
 {
 	int R=1;
+	double t;
 	assert(!S->ctx.backend);
 	
-	S->ctx.c.wtype = GGML_TYPE_F16;
 	S->ctx.tstore = &S->tstore;
 	S->ctx.ss = &g_ss;
 	S->tstore.ss = &g_ss;
+	S->tstore_tae.ss = &g_ss;
 
 	// Backend init
 	if (S->c.backend && S->c.backend[0])
@@ -566,14 +561,15 @@ int mlis_ml_init(MLImgSynthApp* S)
 #endif
 
 	// Model parameters header load
-	S->tstore.cb_add = tname_conv;
+	t = timing_time();
 	if (S->c.path_model) {
 		log_debug("Loading model header from '%s'", S->c.path_model);
 		TRY_LOG( stream_open_file(&S->stm_model, S->c.path_model,
 			SOF_READ | SOF_MMAP),
 			"could not open '%s'", S->c.path_model);
 		log_debug("model stream class: %s", S->stm_model.cls->name);
-		TRY( safet_load_head(&S->tstore, &S->stm_model, NULL) );
+		TRY( tstore_read(&S->tstore, &S->stm_model, NULL) );
+		TRY( mlis_tstore_normalize(&S->tstore) );
 	}
 
 	// TAE model load
@@ -582,10 +578,11 @@ int mlis_ml_init(MLImgSynthApp* S)
 		TRY_LOG( stream_open_file(&S->stm_tae, S->c.path_tae,
 			SOF_READ | SOF_MMAP),
 			"could not open '%s'", S->c.path_tae);
-		TRY( safet_load_head(&S->tstore, &S->stm_tae, "tae.") );
+		TRY( tstore_read(&S->tstore_tae, &S->stm_tae, NULL) );
 	}
-	
-	TRY( open_clip_attn_conv(&S->tstore) );  //TODO: name_conv callback?
+
+	t = timing_time() - t;
+	log_info2("Model header loaded {%.3fs}", t);
 		
 	if (S->c.dump_info)
 		TRY( tstore_info_dump_path(&S->tstore, "dump-tensors.txt") );
@@ -645,28 +642,36 @@ end:
 int mlis_img_encode(MLImgSynthApp* S, const LocalTensor* img, LocalTensor* latent)
 {
 	int R=1;
+	TensorStore *ts = S->ctx.tstore;
 	if (S->c.use_tae) {
-		S->ctx.tprefix = "tae";
+		ts = &S->tstore_tae;
+		SWAPg(S->ctx.tstore, ts);
+		S->ctx.tprefix = NULL;
 		TRY( sdtae_encode(&S->ctx, S->tae_p, img, latent) );
 	} else {
 		S->ctx.tprefix = "vae";
-		TRY( sdvae_encode(&S->ctx, S->vae_p, img, latent) );
+		TRY( sdvae_encode(&S->ctx, S->vae_p, img, latent, S->c.vae_tile) );
 	}
 end:
+	SWAPg(S->ctx.tstore, ts);
 	return R;
 }
 
 int mlis_img_decode(MLImgSynthApp* S, const LocalTensor* latent, LocalTensor* img)
 {
 	int R=1;
+	TensorStore *ts = S->ctx.tstore;
 	if (S->c.use_tae) {
-		S->ctx.tprefix = "tae";
+		TensorStore *ts = &S->tstore_tae;
+		SWAPg(S->ctx.tstore, ts);
+		S->ctx.tprefix = NULL;
 		TRY( sdtae_decode(&S->ctx, S->tae_p, latent, img) );
 	} else {
 		S->ctx.tprefix = "vae";
-		TRY( sdvae_decode(&S->ctx, S->vae_p, latent, img) );
+		TRY( sdvae_decode(&S->ctx, S->vae_p, latent, img, S->c.vae_tile) );
 	}
 end:
+	SWAPg(S->ctx.tstore, ts);
 	return R;
 }
 
@@ -1281,12 +1286,13 @@ end:
 
 int main(int argc, char* argv[])
 {
-	int R=0;
+	int R=0, r;
 	MLImgSynthApp app={0};
 
 	ids_init();
 
-	if (mlis_args_load(&app, argc, argv)) return 11;
+	TRY( r = mlis_args_load(&app, argc, argv) );
+	if (!r) return 0;
 
 #ifdef USE_LIB_PNG
 	extern const ImageCodec img_codec_png;
@@ -1328,7 +1334,7 @@ int main(int argc, char* argv[])
 	}
 
 end:
-	if (R<0) log_error("error exit: %d", R);
+	if (R<0) log_error("error exit: %x", -R);
 	mlis_free(&app);
 	return -R;
 }

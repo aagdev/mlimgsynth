@@ -14,7 +14,7 @@ struct Logger g_logger = {
 
 Stream g_logger_stream;
 
-void log_line_begin(int level)
+void log_line_begin_raw(int level)
 {
 	if (!g_logger.stm) {
 		stream_open_std(&g_logger_stream, STREAM_STD_ERR, 0);		
