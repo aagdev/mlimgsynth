@@ -15,7 +15,7 @@
 #include "vae.h"
 #include "clip.h"
 #include "unet.h"
-#include "solvers.h"
+#include "sampling.h"
 #include "util.h"
 
 #define IDS_IMPLEMENTATION
@@ -28,26 +28,12 @@
 
 #include <math.h>
 
-#define APP_NAME_VERSION "mlimgsynth v0.2.4"
+#define APP_NAME_VERSION "mlimgsynth v0.2.5"
 
 #define debug_pause() do { \
 	puts("Press ENTER to continue"); \
 	getchar(); \
 } while (0)
-
-//#define MLIS_DEBUG_LTENSOR_STATS
-#ifdef MLIS_DEBUG_LTENSOR_STATS
-#define debug_ltensor_stats(T, D) do { \
-	if (ltensor_good(T)) { \
-		float mn, mx = ltensor_minmax(T, &mn); \
-		float avg = ltensor_mean(T); \
-		unsigned n = ltensor_nelements(T); \
-		log_debug("%s n:%u min:%.6g avg:%.6g max:%.6g", (D), n, mn, avg, mx); \
-	} \
-} while (0)
-#else
-#define debug_ltensor_stats(T, D)
-#endif
 
 #define log_vec(LVL,DESC,VEC,VAR,I0,...) \
 if (log_level_check(LVL)) { \
@@ -62,65 +48,69 @@ if (log_level_check(LVL)) { \
 const char version_string[] = APP_NAME_VERSION "\n";
 
 const char help_string[] =
-	APP_NAME_VERSION "\n"
-	"Image synthesis using machine learning.\n"
-	"Currently Stable Diffusion 1, 2 and XL are implemented.\n"
-	"\n"
-	"Usage: mlimgsynth [COMMAND] [OPTIONS]\n"
-	"\n"
-	"Commands:\n"
-	"  list-backends      List available GGML backends.\n"
-	"  vae-encode         Encode an image to a latent.\n"
-	"  vae-decode         Decode a latent to an image.\n"
-	"  vae-test           Encode and decode an image.\n"
-	"  clip-encode        Encode a prompt with the CLIP tokenizer and model.\n"
-	"  generate           Generate an image.\n"
-	"  check              Checks that all the operations (models) are working.\n"
-	"\n"
-	"Options:\n"
-	"  -p TEXT            Prompt for text conditioning.\n"
-	"  -n TEXT            Negative prompt for text unconditioning.\n"
-	"  -b NAME            Backend for computation.\n"
-	"  -t INT             Number of threads to use in the CPU backend.\n"
-	"  -m PATH            Model file.\n"
-	"  -i PATH            Input image or latent.\n"
-	"  -2 PATH            Second input.\n"
-	"  -o PATH            Output path.\n"
-	"  -s --steps INT     Denoising steps with UNet.\n"
-	"  -W INT             Image width. Default: 512 (SD1), 768 (SD2), 1024 (SDXL).\n"
-	"  -H INT             Image height. Default: width.\n"
-	"  -S --seed INT      RNG seed.\n"
-	"\n"
-	"  --method NAME      Sampling method: euler, heun, taylor3 (default).\n"
-	"  --sched NAME       Sampling scheduler: uniform (default), karras.\n"
-	"  --snoise FLOAT     Level of noise injection at each sampling step.\n"
-	"  --cfg-scale FLOAT  Enables and sets the scale of the classifier-free guidance\n"
-	"                     (default: 1).\n"
-	"  --clip-skip INT    Number of CLIP layers to skip.\n"
-	"                     Default: 1 (SD1), 2 (SD2/XL).\n"
-	"  --f-t-ini FLOAT    Initial time factor (default 1).\n"
-	"                     Use it to control the strength in img2img.\n"
-	"  --f-t-end FLOAT    End time factor (default 0).\n"
-	"  --tae PATH         Enables TAE and sets path to tensors.\n"
-	"  --unet-split       Split each unet compute step compute in two parts to reduce memory usage.\n"
-	"  --vae-tile INT     Encode and decode images using tiles of NxN pixels.\n"
-	"                     Reduces memory usage. On doubt, try 512."
-	//"  --type NAME        Convert the weight to this tensor type.\n"
-	//"                     Useful to quantize and reduce RAM usage (try q8_0).\n"
-	"  --dump             Dumps models tensors and graphs.\n"
-	"\n"
-	"  -q                 Quiet: reduces information output.\n"
-	"  -v                 Verbose: increases information output.\n"
-	"  -d                 Enables debug output.\n"
-	"  -h                 Print this message and exit.\n"
-	"  --version          Print the version and exit.\n"
-	;
+APP_NAME_VERSION "\n"
+"Image synthesis using machine learning.\n"
+"Currently Stable Diffusion 1, 2 and XL are implemented.\n"
+"\n"
+"Usage: mlimgsynth [COMMAND] [OPTIONS]\n"
+"\n"
+"Commands:\n"
+"  list-backends        List available GGML backends.\n"
+"  vae-encode           Encode an image to a latent.\n"
+"  vae-decode           Decode a latent to an image.\n"
+"  vae-test             Encode and decode an image.\n"
+"  clip-encode          Encode a prompt with the CLIP tokenizer and model.\n"
+"  generate             Generate an image.\n"
+"  check                Checks that all the operations (models) are working.\n"
+"\n"
+"Options:\n"
+"  -p TEXT              Prompt for text conditioning.\n"
+"  -n TEXT              Negative prompt for text unconditioning.\n"
+"  -b NAME              Backend for computation.\n"
+"  -t INT               Number of threads to use in the CPU backend.\n"
+"  -m PATH              Model file.\n"
+"  -i PATH              Input image or latent.\n"
+"  -2 PATH              Second input.\n"
+"  -o PATH              Output path.\n"
+"  -s --steps INT       Denoising steps with UNet.\n"
+"  -W INT               Image width. Default: 512 (SD1), 768 (SD2), 1024 (SDXL).\n"
+"  -H INT               Image height. Default: width.\n"
+"  -S --seed INT        RNG seed.\n"
+"\n"
+"  --method NAME        Sampling method (default taylor3).\n"
+"                       euler, euler_a, heun, taylor3, dpm++2m, dpm++2s, dpm++2s_a.\n"
+"                       The _a variants are just a shortcut for --s-ancestral=1.\n"
+"  --sched NAME         Sampling scheduler: uniform (default), karras.\n"
+"  --s-noise FLOAT      Level of noise injection at each sampling step (try 1).\n"
+"  --s-ancestral FLOAT  Ancestral sampling noise level (try 1).\n"
+"  --cfg-scale FLOAT    Enables and sets the scale of the classifier-free guidance\n"
+"                       (default: 1).\n"
+"  --clip-skip INT      Number of CLIP layers to skip.\n"
+"                       Default: 1 (SD1), 2 (SD2/XL).\n"
+"  --f-t-ini FLOAT      Initial time factor (default 1).\n"
+"                       Use it to control the strength in img2img.\n"
+"  --f-t-end FLOAT      End time factor (default 0).\n"
+"  --tae PATH           Enables TAE and sets path to tensors.\n"
+"  --unet-split         Split each unet compute step compute in two parts to reduce memory usage.\n"
+"  --vae-tile INT       Encode and decode images using tiles of NxN pixels.\n"
+"                       Reduces memory usage. On doubt, try 512."
+//"  --type NAME          Convert the weight to this tensor type.\n"
+//"                       Useful to quantize and reduce RAM usage (try q8_0).\n"
+"  --dump               Dumps models tensors and graphs.\n"
+"\n"
+"  -q                   Quiet: reduces information output.\n"
+"  -v                   Verbose: increases information output.\n"
+"  -d                   Enables debug output.\n"
+"  -h                   Print this message and exit.\n"
+"  --version            Print the version and exit.\n"
+;
 
 typedef struct {
 	MLCtx ctx;
 	TensorStore tstore, tstore_tae;
 	Stream stm_model, stm_tae;
 	ClipTokenizer tokr;
+	DenoiseSampler sampler;
 
 	const SdTaeParams *tae_p;
 	const VaeParams *vae_p;
@@ -132,9 +122,8 @@ typedef struct {
 	struct {
 		const char *path_model, *path_in, *path_in2, *path_out, *path_tae,
 			*backend, *prompt, *nprompt;
-		int cmd, n_thread, n_step, width, height, seed, method, sched, clip_skip,
-			vae_tile;
-		float s_noise, f_t_ini, f_t_end, cfg_scale;
+		int cmd, n_thread, width, height, seed, clip_skip, vae_tile;
+		float cfg_scale;
 		unsigned dump_info:1, use_tae:1, use_cfg:1, unet_split:1;
 	} c;
 } MLImgSynthApp;
@@ -155,17 +144,31 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 		char * arg = argv[i];
 		if (arg[0] == '-' && arg[1] == '-') {
 			char * next = (i+1 < argc) ? argv[i+1] : "";
-			if      (!strcmp(arg+2, "method")) {
-				S->c.method = id_fromz(next); i++;
+			if      (!strcmp(arg+2, "method"))
+			{
+				if (!strcmp(next, "euler_a")) {
+					S->sampler.c.method = ID_euler;
+					S->sampler.c.s_ancestral = 1;
+				}
+				else if (!strcmp(next, "dpm++2s_a")) {
+					S->sampler.c.method = ID_dpmpp2s;
+					S->sampler.c.s_ancestral = 1;
+				} else {
+					S->sampler.c.method = id_fromz(next);
+				}
+				i++;
 			}
 			else if (!strcmp(arg+2, "sched" )) {
-				S->c.sched = id_fromz(next); i++;
+				S->sampler.c.sched = id_fromz(next); i++;
 			}
-			else if (!strcmp(arg+2, "snoise" )) {
-				S->c.s_noise = atof(next); i++;
+			else if (!strcmp(arg+2, "s-ancestral" )) {
+				S->sampler.c.s_ancestral = atof(next); i++;
+			}
+			else if (!strcmp(arg+2, "s-noise" )) {
+				S->sampler.c.s_noise = atof(next); i++;
 			}
 			else if (!strcmp(arg+2, "steps" )) {
-				S->c.n_step = atoi(next); i++;
+				S->sampler.c.n_step = atoi(next); i++;
 			}
 			else if (!strcmp(arg+2, "seed" )) {
 				g_rng.seed = strtoull(next, NULL, 10); i++;
@@ -178,10 +181,10 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 				S->c.clip_skip = atoi(next); i++;
 			}
 			else if (!strcmp(arg+2, "f-t-ini" )) {
-				S->c.f_t_ini = atof(next); i++;
+				S->sampler.c.f_t_ini = atof(next); i++;
 			}
 			else if (!strcmp(arg+2, "f-t-end" )) {
-				S->c.f_t_end = atof(next); i++;
+				S->sampler.c.f_t_end = atof(next); i++;
 			}
 			else if (!strcmp(arg+2, "tae" )) {
 				S->c.path_tae = next; i++;
@@ -221,7 +224,7 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 				case 'n':  S->c.nprompt = next; i++; break;
 				case 'b':  S->c.backend = next; i++; break;
 				case 't':  S->c.n_thread = atoi(next); i++; break;
-				case 's':  S->c.n_step = atoi(next); i++; break;
+				case 's':  S->sampler.c.n_step = atoi(next); i++; break;
 				case 'W':  S->c.width = atoi(next); i++; break;
 				case 'H':  S->c.height = atoi(next); i++; break;
 				case 'S':  g_rng.seed = strtoull(next, NULL, 10); i++; break;
@@ -267,6 +270,7 @@ end:
 
 void mlis_free(MLImgSynthApp* S)
 {
+	dnsamp_free(&S->sampler);
 	dstr_free(S->tmps_path);
 	dstr_free(S->path_bin);
 	mlctx_free(&S->ctx);
@@ -711,7 +715,7 @@ int mlis_vae_cmd(MLImgSynthApp* S, bool encode, bool decode)
 		if (!S->c.path_in) ERROR_LOG(-1, "Input latent not set");
 		TRY_LOG( ltensor_load_path(&latent, S->c.path_in),
 			"could not load '%s'", S->c.path_in);
-		debug_ltensor_stats(&latent, "latent");
+		log_debug3_ltensor(&latent, "latent");
 	}
 
 	// Sample latent distribution if needed
@@ -923,6 +927,9 @@ int mlis_denoise_dxdt(Solver* sol, float t, const LocalTensor* x,
 	if (!(t >= 0)) return 0;
 	struct dxdt_args *A = sol->user;
 	
+	A->ctx->i_step = A->app->sampler.i_step;  //just to show the progress
+	A->ctx->n_step = A->app->sampler.n_step;
+	
 	TRYR( unet_denoise_run(A->ctx, x, A->cond, A->label, t, dx) );
 	
 	if (A->app->c.use_cfg) {
@@ -934,12 +941,55 @@ int mlis_denoise_dxdt(Solver* sol, float t, const LocalTensor* x,
 	return 1;
 }
 
+int mlis_gen_img_save(MLImgSynthApp* S, Image* img, int nfe)
+{
+	int R=1;
+	DynStr infotxt=NULL;
+
+	// Make info text
+	// Imitates stable-diffusion-webui create_infotext
+	if (S->c.prompt)
+		dstr_printfa(infotxt, "%s\n", S->c.prompt);
+	//TODO: input latent or image filename?
+	dstr_printfa(infotxt, "Seed: %"PRIu64, g_rng.seed);
+	dstr_printfa(infotxt, ", Sampler: %s", id_str(S->sampler.c.method));
+	dstr_printfa(infotxt, ", Schedule type: %s", id_str(S->sampler.c.sched));
+	if (S->sampler.c.s_ancestral > 0)
+		dstr_printfa(infotxt, ", Ancestral: %g", S->sampler.c.s_ancestral);
+	if (S->sampler.c.s_noise > 0)
+		dstr_printfa(infotxt, ", SNoise: %g", S->sampler.c.s_noise);
+	if (S->c.use_cfg)
+		dstr_printfa(infotxt, ", CFG scale: %g", S->c.cfg_scale);
+	dstr_printfa(infotxt, ", Steps: %u", S->sampler.n_step);
+	dstr_printfa(infotxt, ", NFE: %u", nfe);
+	dstr_printfa(infotxt, ", Size: %ux%u", img->w, img->h);
+	dstr_printfa(infotxt, ", Clip skip: %d", S->c.clip_skip);
+	{
+		const char *b = path_tail(S->c.path_model),
+		           *e = path_ext(b);
+		if (*e) e--;  // .
+		dstr_appendz(infotxt, ", Model: ");
+		dstr_append(infotxt, e-b, b);
+	}
+	if (S->c.use_tae)
+		dstr_printfa(infotxt, ", VAE: tae");
+	dstr_printfa(infotxt, ", Version: %s", APP_NAME_VERSION);
+	
+	// Save image with comment
+	IFFALSESET(S->c.path_out, "output.png");
+	log_debug("Writing image to '%s'", S->c.path_out);
+	TRY( img_save_file_info(img, S->c.path_out, "parameters", infotxt) );
+
+end:
+	dstr_free(infotxt);
+	return R;
+}
+
 int mlis_generate(MLImgSynthApp* S)
 {
 	int R=1;
 	UnetState ctx={0};
 	Image img={0};
-	DynStr infotxt=NULL;
 	LocalTensor latent={0}, noise={0}, 
 	            cond={0}, label={0},
 				uncond={0}, unlabel={0};
@@ -968,7 +1018,7 @@ int mlis_generate(MLImgSynthApp* S)
 		TRY( ltensor_shape_check_log(&latent, "input latent",
 			0, 0, S->unet_p->n_ch_in, 1) );
 		
-		debug_ltensor_stats(&latent, "input latent");
+		log_debug3_ltensor(&latent, "input latent");
 
 		S->c.width  = latent.s[0] * S->vae_p->f_down;
 		S->c.height = latent.s[1] * S->vae_p->f_down;
@@ -994,9 +1044,9 @@ int mlis_generate(MLImgSynthApp* S)
 	else
 		ERROR_LOG(-1, "no conditioning (option -2) or prompt (option -p) set");
 	
-	debug_ltensor_stats(&cond, "cond");
+	log_debug3_ltensor(&cond, "cond");
 	//ltensor_save_path(&cond, "cond.tensor");
-	debug_ltensor_stats(&label, "label");
+	log_debug3_ltensor(&label, "label");
 
 	// Negative conditioning
 	if (S->c.use_cfg) {
@@ -1007,105 +1057,34 @@ int mlis_generate(MLImgSynthApp* S)
 	else if (S->c.nprompt && S->c.nprompt[0])
 		log_warning("negative prompt provided but CFG is not enabled");	
 	
-	debug_ltensor_stats(&uncond, "uncond");
-	debug_ltensor_stats(&unlabel, "unlabel");
+	log_debug3_ltensor(&uncond, "uncond");
+	log_debug3_ltensor(&unlabel, "unlabel");
 
-	// Sampling method
-	Solver sol={0};
-	IFFALSESET(S->c.method, ID_taylor3);
-	for (unsigned i=0; g_solvers[i]; ++i)
-		if (S->c.method == g_solvers[i]->name) {
-			sol.C = g_solvers[i];
-		}
-	if (!sol.C) ERROR_LOG(-1, "Invalid method '%s'", id_str(S->c.method));
+	// Sampling initialization
+	S->sampler.unet_p = S->unet_p;
+	S->sampler.nfe_per_dxdt = S->c.use_cfg ? 2 : 1;
 
 	struct dxdt_args A = { .app=S, .ctx=&ctx, .tmpt=&noise,
 		.cond=&cond, .uncond=&uncond, .label=&label, .unlabel=&unlabel };
-	sol.dxdt = mlis_denoise_dxdt;
-	sol.user = &A;
-
-	// Scheduling
-	// Compute times and sigmas for inference
-	int n_step = S->c.n_step;
-	if (n_step < 1) n_step = 20;
-	if (sol.C->n_fe > 1)
-		n_step = (n_step + sol.C->n_fe-1) / sol.C->n_fe;
+	S->sampler.solver.dxdt = mlis_denoise_dxdt;
+	S->sampler.solver.user = &A;
 	
-	int n_nfe_s = sol.C->n_fe;
-	if (S->c.use_cfg) n_nfe_s *= 2;
-	
-	float *sigmas=NULL;
-	vec_resize(sigmas, n_step+1);
-	sigmas[n_step] = 0;
-
-	IFNPOSSET(S->c.f_t_ini, 1);
-	float t_ini = (S->unet_p->n_step_train - 1) * S->c.f_t_ini;
-	float t_end = (S->unet_p->n_step_train - 1) * S->c.f_t_end;
-
-	IFFALSESET(S->c.sched, ID_uniform);
-	switch (S->c.sched) {
-	case ID_uniform: {
-		float b = t_ini,
-		      f = n_step>1 ? (t_end-t_ini)/(n_step-1) : 0;
-		for (unsigned i=0; i<n_step; ++i)
-			sigmas[i] = unet_t_to_sigma(S->unet_p, b+i*f);
-	} break;
-	case ID_karras: {
-		// Uses the model's min and max sigma instead of 0.1 and 10.
-		float smin = unet_t_to_sigma(S->unet_p, t_end),
-		      smax = unet_t_to_sigma(S->unet_p, t_ini),
-			  p=7,
-		      sminp = pow(smin, 1/p),
-		      smaxp = pow(smax, 1/p),
-			  b = smaxp,
-			  f = n_step>1 ? (sminp - smaxp) / (n_step-1) : 0;
-		for (unsigned i=0; i<n_step; ++i)
-			sigmas[i] = pow(b+i*f, p);
-	} break;
-	default:
-		ERROR_LOG(-1, "Unknown scheduler '%s'", id_str(S->c.sched));
-	}
-
-	//log_debug_vec("Times" , times , i, 0, "%.6g", times[i]);
-	log_debug_vec("Sigmas", sigmas, i, 0, "%.6g", sigmas[i]);
+	TRY( dnsamp_init(&S->sampler) );
 
 	// Add noise to initial latent
 	ltensor_resize_like(&noise, &latent);
 	rng_randn(ltensor_nelements(&noise), noise.d);
-	ltensor_for(latent,i,0) latent.d[i] += noise.d[i] * sigmas[0];
-	debug_ltensor_stats(&latent, "latent+noise");
-
-	if (!(0 <= S->c.s_noise && S->c.s_noise < 1))
-		ERROR_LOG(-1, "snoise out of range");
+	ltensor_for(latent,i,0) latent.d[i] += noise.d[i] * S->sampler.sigmas[0];
+	log_debug3_ltensor(&latent, "latent+noise");
 	
 	// Prepare computation
 	S->ctx.tprefix = "unet";
 	TRY( unet_denoise_init(&ctx, &S->ctx, S->unet_p, latent.s[0], latent.s[1],
 		S->c.unet_split) );
-	ctx.n_step = n_step;
-	
-	log_info("Generating "
-		"(solver: %s, sched: %s, snoise: %g, steps: %d, nfe/s: %d)",
-		id_str(S->c.method), id_str(S->c.sched), S->c.s_noise, n_step, n_nfe_s);
-	sol.t = sigmas[0];  //initial t
-	for (int s=0; s<n_step; ++s)
-	{
-		if (S->c.s_noise > 0 && s > 0) {
-			// Stochastic sampling may help to add detail lost during sampling.
-			// See Karras2022 Algo2
-			rng_randn(ltensor_nelements(&noise), noise.d);
-			float f = S->c.s_noise,
-			      s_curr  = sol.t,
-			      s_hat   = sqrt(s_curr*s_curr + f*f);
-			log_debug("sigma_hat_%d=%g f=%g", s, s_hat, f);
-			ltensor_for(latent,i,0) latent.d[i] += noise.d[i] * f;
-			sol.t = s_hat;
-		}
-		ctx.i_step = s;
-		TRY( solver_step(&sol, sigmas[s+1], &latent) );
-		debug_ltensor_stats(&latent, "step latent");
-	}
 
+	// Denoising / generation / sampling
+	TRY( dnsamp_sample(&S->sampler, &latent) );
+	
 	// Save latent
 	const char *path_latent = "latent-out.tensor";  //TODO: option
 	ltensor_save_path(&latent, path_latent);
@@ -1116,40 +1095,10 @@ int mlis_generate(MLImgSynthApp* S)
 	TRY( mlis_img_decode(S, &latent, &latent) );
 	ltensor_to_image(&latent, &img);
 
-	// Make info text
-	// Imitates stable-diffusion-webui create_infotext
-	if (S->c.prompt)
-		dstr_printfa(infotxt, "%s\n", S->c.prompt);
-	//TODO: input latent or image filename?
-	dstr_printfa(infotxt, "Seed: %"PRIu64, g_rng.seed);
-	dstr_printfa(infotxt, ", Sampler: %s", id_str(S->c.method));
-	dstr_printfa(infotxt, ", Schedule type: %s", id_str(S->c.sched));
-	if (S->c.s_noise > 0)
-		dstr_printfa(infotxt, ", SNoise: %s", S->c.s_noise);
-	if (S->c.use_cfg)
-		dstr_printfa(infotxt, ", CFG scale: %g", S->c.cfg_scale);
-	dstr_printfa(infotxt, ", Steps: %u", n_step);
-	dstr_printfa(infotxt, ", NFE: %u", ctx.nfe);
-	dstr_printfa(infotxt, ", Size: %ux%u", img.w, img.h);
-	dstr_printfa(infotxt, ", Clip skip: %d", S->c.clip_skip);
-	{
-		const char *b = path_tail(S->c.path_model),
-		           *e = path_ext(b);
-		if (*e) e--;  // .
-		dstr_appendz(infotxt, ", Model: ");
-		dstr_append(infotxt, e-b, b);
-	}
-	if (S->c.use_tae)
-		dstr_printfa(infotxt, ", VAE: tae");
-	dstr_printfa(infotxt, ", Version: %s", APP_NAME_VERSION);
-	
-	// Save image with comment
-	IFFALSESET(S->c.path_out, "output.png");
-	log_debug("Writing image to '%s'", S->c.path_out);
-	TRY( img_save_file_info(&img, S->c.path_out, "parameters", infotxt) );
+	// Save
+	TRY( mlis_gen_img_save(S, &img, ctx.nfe) );
 
 end:
-	dstr_free(infotxt);
 	img_free(&img);
 	ltensor_free(&noise);
 	ltensor_free(&uncond);

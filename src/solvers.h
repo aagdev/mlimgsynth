@@ -40,6 +40,8 @@ typedef struct {
 extern const SolverClass g_solver_euler;
 extern const SolverClass g_solver_heun;
 extern const SolverClass g_solver_taylor3;
+extern const SolverClass g_solver_dpmpp2m;
+extern const SolverClass g_solver_dpmpp2s;
 
 extern const SolverClass *g_solvers[];  //list of all available solvers
 
@@ -47,28 +49,21 @@ typedef struct Solver {
 	const SolverClass *C;
 
 	// State
-	LocalTensor dx;
-	LocalTensor *ex;  //vector, extra tensors used by each model
+	LocalTensor dx,
+	            tmp[8];  //vector, temporal tensors
 	float t;
-	unsigned n_step;
+	unsigned i_step, i_tmp;
 
-	// Config
+	// Config (fill before use)
 	int (*dxdt)(struct Solver*, float t, const LocalTensor* x, LocalTensor* dx);
 	void *user;
 } Solver;
 
 void solver_free(Solver* S);
 
-static inline
-int solver_step(Solver* S, float t, LocalTensor* x)
-{
-	ltensor_resize_like(&S->dx, x);
-	int r = S->C->step(S, t-S->t, x);
-	if (r < 0) return r;
-	S->t = t;
-	S->n_step++;
-	return r;
-}
+int solver_init(Solver* S, int clsname);
+
+int solver_step(Solver* S, float t, LocalTensor* x);
 
 static inline
 int solver_dxdt(Solver* S, float t, const LocalTensor* x, LocalTensor* dx)
@@ -77,4 +72,30 @@ int solver_dxdt(Solver* S, float t, const LocalTensor* x, LocalTensor* dx)
 	int r = S->dxdt(S, t, x, dx);
 	if (r < 0) return r;
 	return r;
+}
+
+// Internal use
+
+static inline
+LocalTensor* solver_tmp_get(Solver* S)
+{
+	assert( S->i_tmp < COUNTOF(S->tmp) );
+	S->i_tmp++;
+	return &S->tmp[S->i_tmp-1];
+}
+
+static inline
+LocalTensor* solver_tmp_get_resize(Solver* S, int n0, int n1, int n2, int n3)
+{
+	LocalTensor* lt = solver_tmp_get(S);
+	ltensor_resize(lt, n0, n1, n2, n3);
+	return lt;
+}
+
+static inline
+LocalTensor* solver_tmp_get_resize_like(Solver* S, const LocalTensor* x)
+{
+	LocalTensor* lt = solver_tmp_get(S);
+	ltensor_resize_like(lt, x);
+	return lt;
 }

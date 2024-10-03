@@ -131,3 +131,8 @@ int ltensor_img_redblue_path(const LocalTensor* S, const char* path);
 
 #define ltensor_for(T,V,I) \
 	for (unsigned V=(I), V##e_=ltensor_nelements(&(T)); V<V##e_; ++V)
+
+void log_ltensor_stats(int loglvl, const LocalTensor* S, const char* desc);
+
+#define log_debug3_ltensor(T, D) \
+	log_ltensor_stats(LOG_LVL_DEBUG3, (T), (D))

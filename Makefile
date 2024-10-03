@@ -67,4 +67,4 @@ tstore-util: $(common) tensorstore.o tensorstore_safet.o tensorstore_gguf.o \
 mlimgsynth: $(common) rng_philox.o localtensor.o \
 	tensorstore.o tensorstore_safet.o tensorstore_gguf.o \
 	ggml_extend.o mlblock.o mlblock_nn.o tae.o vae.o clip.o unet.o \
-	solvers.o util.o main_mlimgsynth.o
+	solvers.o sampling.o util.o main_mlimgsynth.o

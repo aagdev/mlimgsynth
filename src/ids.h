@@ -16,6 +16,8 @@
 	S(euler) \
 	S(heun) \
 	S(taylor3) \
+	S2(dpmpp2m,"dpm++2m") \
+	S2(dpmpp2s,"dpm++2s") \
 	S(check) \
 	S2(list_backends,"list-backends") \
 	S2(vae_encode,"vae-encode") \

@@ -82,6 +82,18 @@ float ltensor_mean(const LocalTensor* S)
 	return s / n;
 }
 
+void log_ltensor_stats(int loglvl, const LocalTensor* S, const char* desc)
+{
+	if (ltensor_good(S)) {
+		float mn, mx = ltensor_minmax(S, &mn);
+		float avg = ltensor_mean(S);
+		unsigned n = ltensor_nelements(S);
+		log_log(loglvl, "%s n:%u min:%.6g avg:%.6g max:%.6g", desc, n, mn, avg, mx);
+	} else {
+		log_log(loglvl, "%s empty", desc);
+	}
+}
+
 int ltensor_save_path(const LocalTensor* S, const char* path)
 {
 	int R=1;

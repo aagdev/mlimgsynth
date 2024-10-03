@@ -242,7 +242,8 @@ int tstore_tensor_read(TSTensorEntry* S, struct ggml_tensor* t)
 		ggml_type_name(t->type));
 
 	TSTensorData td={0};
-	TRY( R = tstore_tensor_data_get(S, target, 0, &td) );
+	int flags = TSTDG_F_PERM;  //TODO: only if it will be used multiple times
+	TRY( R = tstore_tensor_data_get(S, target, flags, &td) );
 	ggml_backend_tensor_set(t, td.data, 0, td.size);
 	tstore_tdata_free(&td);
 
