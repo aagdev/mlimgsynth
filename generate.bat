@@ -4,14 +4,21 @@ title mlimgsynth
 REM Generation options
 set PROMPT=a photograph of an astronaut riding a horse
 set NPROMPT=
-set CFG_SCALE=7
-set STEPS=12
 set SEED=
 set WIDTH=
 set HEIGHT=
 set OUTNAME=output
 set OUTEXT=png
 set NBATCH=1
+
+set CFG_SCALE=7
+set STEPS=12
+
+REM Sampling method
+set METHOD=dpm++2m
+set SCHED=karras
+set SAMPOPT=
+REM set SAMPOPT=--s-ancestral 1
 
 REM Leave empty to use CPU if you do not have a supported GPU
 set BACKEND=Vulkan0
@@ -42,7 +49,7 @@ REM set EXTRA=%EXTRA% -d
 
 for /L %%I in (1,1,%NBATCH%) do (
 	echo Generating %%I / %NBATCH%
-	mlimgsynth generate -b "%BACKEND%" -m "%MODEL%" -p "%PROMPT%" -n "%NPROMPT%" -o "%OUTNAME%-%%I.%OUTEXT%" -W %WIDTH% -H %HEIGHT% --cfg-scale %CFG_SCALE% --steps %STEPS% --seed %SEED% %EXTRA%
+	mlimgsynth generate -b "%BACKEND%" -m "%MODEL%" -p "%PROMPT%" -n "%NPROMPT%" -o "%OUTNAME%-%%I.%OUTEXT%" -W "%WIDTH%" -H "%HEIGHT%" --cfg-scale "%CFG_SCALE%" --steps "%STEPS%" --seed "%SEED%" --method "%METHOD%" --sched "%SCHED%" %SAMPOPT% %EXTRA%
 	if errorlevel 1 goto error
 )
 goto done

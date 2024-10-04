@@ -131,6 +131,7 @@ typedef struct {
 int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 {
 	int R=1;
+	bool print_help=false;
 
 	if (argc <= 1) RETURN(0);
 
@@ -153,7 +154,8 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 				else if (!strcmp(next, "dpm++2s_a")) {
 					S->sampler.c.method = ID_dpmpp2s;
 					S->sampler.c.s_ancestral = 1;
-				} else {
+				}
+				else {
 					S->sampler.c.method = id_fromz(next);
 				}
 				i++;
@@ -208,6 +210,11 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 				S->c.dump_info = true;
 			}
 			else if (!strcmp(arg+2, "version" )) {
+				puts(APP_NAME_VERSION "\n");
+				RETURN(0);
+			}
+			else if (!strcmp(arg+2, "help" )) {
+				print_help = true;
 				RETURN(0);
 			}
 			else {
@@ -235,7 +242,9 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 				case 'q':  log_level_inc(-LOG_LVL_STEP); break;
 				case 'v':  log_level_inc(+LOG_LVL_STEP); break;
 				case 'd':  log_level_set(LOG_LVL_DEBUG); break;
-				case 'h':  RETURN(0);
+				case 'h':
+					print_help = true;
+					RETURN(0);
 				default:
 					ERROR_LOG(-1, "Unknown option '-%c'", opt);
 				}
@@ -245,7 +254,7 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 			S->c.cmd = id_fromz(arg);
 		}
 		else {
-			ERROR_LOG(-1, "Excess of arguments");
+			ERROR_LOG(-1, "Excess of arguments: %s", arg);
 		}
 	}
 	
@@ -264,7 +273,7 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 	log_debug("Seed: %zu", g_rng.seed);
 
 end:
-	if (R==0) puts(help_string);
+	if (print_help) puts(help_string);
 	return R;
 }
 

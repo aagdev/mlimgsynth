@@ -3,14 +3,20 @@
 # Generation options
 PROMPT="a photograph of an astronaut riding a horse"
 NPROMPT=
-CFG_SCALE=7
-STEPS=12
 SEED=
 WIDTH=
 HEIGHT=
 OUTNAME="output"
 OUTEXT="png"
 NBATCH=1
+
+CFG_SCALE=7
+STEPS=12
+
+# Sampling method
+METHOD=dpm++2m
+SCHED=karras
+#SAMPOT="--s-ancestral 1"
 
 # Leave empty to use CPU if you do not have a supported GPU
 BACKEND=Vulkan0
@@ -43,6 +49,6 @@ EXTRA=
 idx=1
 while [ $idx -le $NBATCH ]; do
 	echo "Generating $idx / $NBATCH"
-	./mlimgsynth generate -b "$BACKEND" -m "$MODEL" -p "$PROMPT" -n "$NPROMPT" -o "$OUTNAME-$idx.$OUTEXT" -W "$WIDTH" -H "$HEIGHT" --cfg-scale "$CFG_SCALE" --steps "$STEPS" --seed "$SEED" $EXTRA
+	./mlimgsynth generate -b "$BACKEND" -m "$MODEL" -p "$PROMPT" -n "$NPROMPT" -o "$OUTNAME-$idx.$OUTEXT" -W "$WIDTH" -H "$HEIGHT" --cfg-scale "$CFG_SCALE" --steps "$STEPS" --seed "$SEED" --method "$METHOD" --sched "$SCHED" $SAMPOPT $EXTRA
     idx=$(($idx+1))
 done
