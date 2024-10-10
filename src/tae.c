@@ -96,7 +96,10 @@ int sdtae_encode(MLCtx* C, const SdTaeParams* P,
 {
 	int R=1;
 	
-	TRY( ltensor_shape_check_log(latent, "img", 0,0,3,1) );
+	const int f = 8;  //latent to image scale (8 for SD)
+	if (!(img->s[0]%f==0 && img->s[1]%f==0 && img->s[2]==3 && img->s[3]==1))
+		ERROR_LOG(-1, "invalid input image shape: " LT_SHAPE_FMT,
+			LT_SHAPE_UNPACK(*img));
 	
 	mlctx_begin(C, "TAE encode");
 	

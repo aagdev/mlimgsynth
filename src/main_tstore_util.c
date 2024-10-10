@@ -116,7 +116,7 @@ int convert(Stream* so, const TensorStore* sti, const char* s_dtype)
 	double t = timing_time();
 	
 	extern const TensorStoreFormat ts_cls_safet;  //TODO: option
-	TRY( tstore_write(&sto, so, &ts_cls_safet) );
+	TRY( tstore_write(&sto, so, &ts_cls_safet, NULL) );
 
 	unsigned n_tensor=0, n_conv=0;
 	vec_for(sto.tensors,i,0) {
@@ -274,7 +274,7 @@ int main(int argc, char* argv[])
 	log_debug("Loading...");
 	//TRY( tstore_safet_load_head(&sti, &si, NULL) );
 	double t = timing_time();
-	TRY( tstore_read(&sti, &si, NULL) );
+	TRY( tstore_read(&sti, &si, NULL, NULL) );
 	t = timing_time() - t;
 	log_info("Load header {%.3fms}", t*1e3);
 

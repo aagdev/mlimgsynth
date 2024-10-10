@@ -10,6 +10,6 @@ extern const TensorStoreFormat ts_cls_safet;
 
 int tstore_detect_safet(Stream* stm);
 
-int tstore_read_safet(TensorStore*, Stream*);
+int tstore_read_safet(TensorStore* ts, Stream* stm, TSCallback*);
 
-int tstore_write_safet(TensorStore*, Stream*);
+int tstore_write_safet(TensorStore* ts, Stream* stm, TSCallback* cb);

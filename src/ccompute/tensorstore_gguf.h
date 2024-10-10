@@ -10,4 +10,4 @@ extern const TensorStoreFormat ts_cls_gguf;
 
 int tstore_detect_gguf(Stream* stm);
 
-int tstore_read_gguf(TensorStore* S, Stream* stm);
+int tstore_read_gguf(TensorStore* ts, Stream* stm, TSCallback* cb);

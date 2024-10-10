@@ -148,12 +148,12 @@ end:
 	return R;
 }
 
-int tstore_read_safet(TensorStore* S, Stream* stm)
+int tstore_read_safet(TensorStore* S, Stream* stm, TSCallback* cb)
 {
 	int R=1, r;
 	StioStream sio={0};
 	StioItem itm;
-	DynStr key=NULL;
+	DynStr name=NULL;
 	char buffer[2048];
 
 	uint64_t os_data;
@@ -180,16 +180,18 @@ int tstore_read_safet(TensorStore* S, Stream* stm)
 		TRY( stio_item_type_check(&itm, STIO_T_KEY, ANY_T_STRING) );
 
 		if (!strcmp(itm.value.p.cp, "__metadata__")) {
-			TRY( safet_read_meta(S, &sio, &key) );
+			TRY( safet_read_meta(S, &sio, &name) );
 			n_meta++;
 		} else {
-			//dstr_copyz(key, prefix);
-			dstr_copy(key, itm.value.len, itm.value.p.cp);
+			dstr_copy(name, itm.value.len, itm.value.p.cp);
 			TSTensorEntry e={0};
-			TRY( safet_read_tensor(&sio, &e, key) );
+			TRY( safet_read_tensor(&sio, &e, name) );
 			e.offset += os_data;
-			TRY( tstore_tensor_add(S, key, &e) );
-			n_tensor++;
+			TRY( r = tstore_cb_call(cb, S, &e, &name) );
+			if (r > 0) {
+				TRY( tstore_tensor_add(S, name, &e) );
+				n_tensor++;
+			}
 		}
 	}
 
@@ -197,7 +199,7 @@ int tstore_read_safet(TensorStore* S, Stream* stm)
 
 end:
 	if (R<0) log_error("safetensors read at position 0x%zx: %x", stream_pos_get(stm), -R);
-	dstr_free(key);
+	dstr_free(name);
 	return R;	
 }
 
@@ -216,19 +218,10 @@ int stream_str_put_escape(Stream* stm, const char* str)
 	return 1;
 }
 
-static inline
-bool id_prefix_check(int id, const char* prefix)
-{
-	if (!(prefix && prefix[0])) return true;
-	const char *str = id_str(id);
-	unsigned i=0;
-	while (str[i] == prefix[i] && str[i]) i++;
-	return !prefix[i];
-}
-
-int tstore_write_safet(TensorStore* S, Stream* stm)
+int tstore_write_safet(TensorStore* S, Stream* stm, TSCallback* cb)
 {
 	int R=0;
+	DynStr tmps=NULL;
 	uint64_t offset=0, os_data=0, os_end=0;
 
 	if (stream_write_var(stm, offset) < 0)  //placeholder
@@ -256,7 +249,10 @@ int tstore_write_safet(TensorStore* S, Stream* stm)
 
 	// Tensors
 	vec_forp(TSTensorEntry, S->tensors, e, 0) {
-		//if (!id_prefix_check(e->key, prefix)) continue;
+		dstr_resize(tmps, 0);
+		if (tstore_cb_call(cb, S, e, &tmps) < 0) continue;
+		const char *name = dstr_empty(tmps) ? id_str(e->key) : tmps;
+
 		e->stm = stm;
 		e->offset = offset;
 		e->size = tstore_tensor_size(e);
@@ -264,7 +260,7 @@ int tstore_write_safet(TensorStore* S, Stream* stm)
 
 		if (first) first=false; else stream_char_put(stm, ',');
 		stream_char_put(stm, '"');
-		stream_str_put_escape(stm, id_str(e->key));
+		stream_str_put_escape(stm, name);
 		stream_str_put(stm, "\":{");
 		stream_printf(stm, "\"dtype\":\"%s\"", tstore_dtype_str(e->dtype));
 		if (e->shape_n) {
@@ -303,6 +299,7 @@ int tstore_write_safet(TensorStore* S, Stream* stm)
 
 end:
 	if (R<0) log_error("safetensors write: %x", -R);
+	dstr_free(tmps);
 	return R;
 }
 

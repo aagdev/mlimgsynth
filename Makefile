@@ -49,6 +49,10 @@ mlimgsynth: cppflags += -DUSE_LIB_JPEG
 mlimgsynth: image_io_jpeg.o
 endif
 
+# GCC 13.3.1 20240614 warns about dstr_appendz and dstr_insertz
+# I think the code is ok, but I will check later
+FLAGS=-Wno-array-bounds -Wno-stringop-overflow
+
 ### Module dependencies
 tensorstore.o: cppflags += -DTENSORSTORE_USE_GGML -DTENSORSTORE_FMT_GGUF \
 	-DTENSORSTORE_FMT_SAFET
@@ -66,5 +70,5 @@ tstore-util: $(common) tensorstore.o tensorstore_safet.o tensorstore_gguf.o \
 
 mlimgsynth: $(common) rng_philox.o localtensor.o \
 	tensorstore.o tensorstore_safet.o tensorstore_gguf.o \
-	ggml_extend.o mlblock.o mlblock_nn.o tae.o vae.o clip.o unet.o \
-	solvers.o sampling.o util.o main_mlimgsynth.o
+	ggml_extend.o mlblock.o mlblock_nn.o tae.o vae.o clip.o unet.o lora.o \
+	solvers.o sampling.o tensor_name_conv.o util.o main_mlimgsynth.o

@@ -244,6 +244,9 @@ typedef char* DynStr;
 #define dstr_for(P,V,I) \
 	for (dynbuf_uint V=(I), V##e_=dstr_count(P); V<V##e_; ++V)
 
+#define dstr_forr(P,V) \
+	for (dynbuf_uint V##e_=dstr_count(P), V=V##e_-1; V<V##e_; --V)
+
 // utilize
 #define dstr_ifempty_copyz(P,D) \
 	(dstr_empty(P) ? dstr_copyz((P),(D)) : 0)

@@ -42,6 +42,7 @@ typedef enum {
 	TS_DTYPE_F64,
 	TS_DTYPE_F32,
 	TS_DTYPE_F16,
+	TS_DTYPE_BF16,
 	TS_DTYPE_I64,
 	TS_DTYPE_I32,
 	TS_DTYPE_I16,
@@ -81,7 +82,7 @@ int tstore_dtype_to_mda(int dt);
 
 typedef struct {
 	TSDType dtype;  	//data type
-	const void *data;
+	void *data;
 	size_t size;
 	unsigned ownmem:1,
 	         perm:1;	//<data> remains valid for the lifetime of the tensor store
@@ -121,15 +122,33 @@ uint64_t tstore_tensor_size(const TSTensorEntry* S);
 int tstore_tensor_data_get(TSTensorEntry* S, TSDType dtype, int flags,
 	TSTensorData* out);
 
-enum { TSTDG_F_PERM=1 };
+enum tstore_tensor_data_get_flags_t {
+	TSTDG_F_PERM  = 1,  // out->data is in permanent storage
+	TSTDG_F_WRITE = 2,  // Returns memory that can be written
+};
+
+/* IO CallBack */
+
+typedef struct {
+	int (*func)(void* user, TensorStore* ts, TSTensorEntry* te, DynStr* pname);
+	void *user;
+} TSCallback;
+
+static inline
+int tstore_cb_call(TSCallback* cb, TensorStore* ts, TSTensorEntry* te,
+	DynStr* pname)
+{
+	if (!cb || !cb->func) return 1;
+	return cb->func(cb->user, ts, te, pname);
+}
 
 /* Parser */
 
 typedef struct {
 	const char *name, *ext;
 	int (*detect)(Stream*);
-	int (*read)(TensorStore*, Stream*);
-	int (*write)(TensorStore*, Stream*);
+	int (*read)(TensorStore*, Stream*, TSCallback*);
+	int (*write)(TensorStore*, Stream*, TSCallback*);
 } TensorStoreFormat;
 
 int tstore_format_register(const TensorStoreFormat*);
@@ -151,20 +170,20 @@ void tstore_free(TensorStore*);
 /* Read tensors information from a stream.
  * Does not read the tensors data.
  * fmt: data format. If NULL, tries to guess from the data.
+ * cb: Optional. Function called before adding each tensor. If it returns non
+ *     positive, the tensor is not added. May change the name.
  */
-int tstore_read(TensorStore* S, Stream* stm, const TensorStoreFormat* fmt);
+int tstore_read(TensorStore* S, Stream* stm, const TensorStoreFormat* fmt,
+	TSCallback* cb);
 
 /* Write tensors information to a stream.
  * Does not writes the tensors data.
  * fmt: data format.
+ * cb: Optional. Function called before writing each tensor. If it returns non
+ *     positive, the tensor is not written. May store a new name in *pname.
  */
-int tstore_write(TensorStore* S, Stream* stm, const TensorStoreFormat* fmt);
-
-/* Load tensors from a file.
- * fmt: data format. If NULL, tries to guess from the data.
- */
-int tstore_load_path(TensorStore* S, const char* path,
-	const TensorStoreFormat* fmt);
+int tstore_write(TensorStore* S, Stream* stm, const TensorStoreFormat* fmt,
+	TSCallback* cb);
 
 /* Tries to detect the data format of a stream.
  */

@@ -110,7 +110,7 @@ MLTensor* mlb_downsample(MLCtx* C, MLTensor* x, int ch_out, bool vae)
 		x = ggml_pad(C->cc, x, 1, 1, 0, 0);
 		x = MLN("conv", mlb_nn_conv2d(C, x, ch_out, 3,3, 2,2, 0,0, 1,1, T));
 	} else
-		x = MLN("op", mlb_nn_conv2d(C, x, ch_out, 3,3, 2,2, 1,1, 1,1, T));
+		x = MLN("conv", mlb_nn_conv2d(C, x, ch_out, 3,3, 2,2, 1,1, 1,1, T));
 	// x: [N, ch_out, h/2, w/2]
 	return x;
 }

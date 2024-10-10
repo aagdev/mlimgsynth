@@ -85,3 +85,44 @@ char* strsl_getz(size_t bufsz, char* buf, const StrSlice ss) {
 	strsl_copyz(bufsz, buf, ss);
 	return buf;
 }
+
+// Utility
+
+static inline
+int strsl_startswith(const StrSlice ss, const StrSlice prefix) {
+	if (!(ss.s >= prefix.s)) return 0;
+	return !memcmp(ss.b, prefix.b, prefix.s);
+}
+
+static inline
+int strsl_endswith(const StrSlice ss, const StrSlice suffix) {
+	if (!(ss.s >= suffix.s)) return 0;
+	return !memcmp(ss.b+ss.s-suffix.s, suffix.b, suffix.s);
+}
+
+static inline
+int strsl_prefix_trim(StrSlice* pss, const StrSlice prefix)
+{
+	if (!strsl_startswith(*pss, prefix)) return 0;
+	pss->b += prefix.s;
+	pss->s -= prefix.s;
+	return 1;
+}
+
+static inline
+int strsl_prefixz_trim(StrSlice* pss, const char* prefix) {
+	return strsl_prefix_trim(pss, strsl_fromz(prefix));
+}
+
+static inline
+int strsl_suffix_trim(StrSlice* pss, const StrSlice suffix)
+{
+	if (!strsl_endswith(*pss, suffix)) return 0;
+	pss->s -= suffix.s;
+	return 1;
+}
+
+static inline
+int strsl_suffixz_trim(StrSlice* pss, const char* suffix) {
+	return strsl_suffix_trim(pss, strsl_fromz(suffix));
+}

@@ -14,11 +14,12 @@ typedef struct {
 	const UnetParams *unet_p;  //fill before use
 	int nfe_per_dxdt;  //fill before use
 
-	LocalTensor noise;
+	LocalTensor noise, x0;
 
 	struct {
 		int n_step, method, sched;
 		float f_t_ini, f_t_end, s_noise, s_ancestral;
+		LocalTensor *lmask;
 	} c;
 } DenoiseSampler;
 

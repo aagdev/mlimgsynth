@@ -126,7 +126,7 @@ MLTensor* mlb_spatial_transf(MLCtx* C, MLTensor* x, MLTensor* ctx,
 	// [N, h * w, d_embed]
 
 	for (int i=0; i<n_depth; ++i) {
-		sprintf(name, "transformer_blocks.%d", i);
+		sprintf(name, "transf.%d", i);
 		x = MLN(name, mlb_basic_transf(C, x, ctx, d_embed, d_embed, n_head));
 	}
 
@@ -153,9 +153,9 @@ MLTensor* mlb_unet__embed(MLCtx* C, MLTensor* time, MLTensor* label,
 	// [N, n_te]
 	
 	if (P->ch_adm_in && label) {
-		MLTensor *le = MLN("label_emb.0.0", mlb_nn_linear(C, label, P->n_te, T));
+		MLTensor *le = MLN("label_embed.0", mlb_nn_linear(C, label, P->n_te, T));
 		le = ggml_silu_inplace(C->cc, le);	
-		le = MLN("label_emb.0.2", mlb_nn_linear(C, le, P->n_te, T));
+		le = MLN("label_embed.2", mlb_nn_linear(C, le, P->n_te, T));
 		emb = ggml_add(C->cc, emb, le);
 	}
 
@@ -167,7 +167,7 @@ MLTensor* mlb_unet__in(MLCtx* C, MLTensor* x, MLTensor* emb, MLTensor* ctx,
 {
 	char name[64];
 
-	x = MLN("input_blocks.0.0", mlb_nn_conv2d(C, x,
+	x = MLN("in.conv", mlb_nn_conv2d(C, x,
 		P->n_ch, 3,3, 1,1, 1,1, 1,1, T));
 	
 	MLTensor ** stack = NULL;
@@ -177,18 +177,18 @@ MLTensor* mlb_unet__in(MLCtx* C, MLTensor* x, MLTensor* emb, MLTensor* ctx,
 		if (im) {
 			ds *= 2;
 			i_blk++;
-			sprintf(name, "input_blocks.%d.0", i_blk);
+			sprintf(name, "in.%d.0", i_blk);
 			x = MLN(name, mlb_downsample(C, x, ch, false));
 			vec_push(stack, x);
 		}
 		for (unsigned j=0; j<P->n_res_blk; ++j) {
 			i_blk++;
-			sprintf(name, "input_blocks.%d.0", i_blk);
+			sprintf(name, "in.%d.0", i_blk);
 			ch = P->n_ch * P->ch_mult[im];
 			x = MLN(name, mlb_resnet(C, x, emb, ch));
 
 			if (static_vector_in(P->attn_res, ds)) {
-				sprintf(name, "input_blocks.%d.1", i_blk);
+				sprintf(name, "in.%d.1", i_blk);
 				x = MLN(name, mlb_spatial_transf(C, x, ctx,
 					ch, P->d_head, P->n_head, P->transf_depth[im]));
 			}
@@ -207,10 +207,10 @@ MLTensor* mlb_unet__mid(MLCtx* C, MLTensor* x, MLTensor* emb, MLTensor* ctx,
 	while (P->ch_mult[im+1]) im++;
 	int ch = P->n_ch * P->ch_mult[im];
 
-	x = MLN("middle_block.0", mlb_resnet(C, x, emb, ch));
-	x = MLN("middle_block.1", mlb_spatial_transf(C, x, ctx,
+	x = MLN("mid.0", mlb_resnet(C, x, emb, ch));
+	x = MLN("mid.1", mlb_spatial_transf(C, x, ctx,
 		ch, P->d_head, P->n_head, P->transf_depth[im]));
-	x = MLN("middle_block.2", mlb_resnet(C, x, emb, ch));
+	x = MLN("mid.2", mlb_resnet(C, x, emb, ch));
 	return x;
 }
 
@@ -232,17 +232,17 @@ MLTensor* mlb_unet__out(MLCtx* C, MLTensor* x, MLTensor* emb, MLTensor* ctx,
 
 			unsigned i_sub=0;
 			ch = P->n_ch * P->ch_mult[im];
-			sprintf(name, "output_blocks.%d.%d", i_oblk, i_sub++);
+			sprintf(name, "out.%d.%d", i_oblk, i_sub++);
 			x = MLN(name, mlb_resnet(C, x, emb, ch));
 
 			if (static_vector_in(P->attn_res, ds)) {
-				sprintf(name, "output_blocks.%d.%d", i_oblk, i_sub++);
+				sprintf(name, "out.%d.%d", i_oblk, i_sub++);
 				x = MLN(name, mlb_spatial_transf(C, x, ctx,
 					ch, P->d_head, P->n_head, P->transf_depth[im]));
 			}
 
 			if (im != 0 && j == P->n_res_blk) {
-				sprintf(name, "output_blocks.%d.%d", i_oblk, i_sub++);
+				sprintf(name, "out.%d.%d", i_oblk, i_sub++);
 				x = MLN(name, mlb_upsample(C, x, ch));
 				ds /= 2;
 			}
@@ -250,9 +250,9 @@ MLTensor* mlb_unet__out(MLCtx* C, MLTensor* x, MLTensor* emb, MLTensor* ctx,
 	}
 	assert(vec_count(stack) == 0);
 	
-	x = MLN("out.0", mlb_nn_groupnorm32(C, x));
+	x = MLN("out.norm", mlb_nn_groupnorm32(C, x));
 	x = ggml_silu_inplace(C->cc, x);
-	x = MLN("out.2", mlb_nn_conv2d(C, x,
+	x = MLN("out.conv", mlb_nn_conv2d(C, x,
 		P->n_ch_out, 3,3, 1,1, 1,1, 1,1, T));
 
 	return x;
@@ -483,8 +483,7 @@ int unet_denoise_run(UnetState* S,
 	log_info("Step %u/%u NFE %d done {%.3fs}",
 		S->i_step+1, S->n_step, S->nfe, t_comp);
 	
-	ltensor_for(*dx,i,0)
-		if (!isfinite(dx->d[i])) ERROR_LOG(-1, "NaN found in UNet output");
+	TRY_LOG( ltensor_finite_check(dx), "NaN found in UNet output");
 
 	// Scale output
 	if (S->par->vparam) {

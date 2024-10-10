@@ -237,11 +237,11 @@ MLTensor* mlb_clip_embeddings(MLCtx* C, MLTensor* x, MLTensor* tw,
 	if (tw) {
 		GGML_ASSERT(tw->ne[0] == d_embed);
 	} else {
-		tw = MLN("token_embedding.weight",
+		tw = MLN("token.weight",
 			ggml_new_tensor_2d(C->cp, C->c.wtype, d_embed, n_vocab));
 	}
 	
-	pw = MLN("position_embedding.weight",
+	pw = MLN("position.weight",
 		ggml_new_tensor_2d(C->cp, GGML_TYPE_F32, d_embed, n_token));
 	
 	// token_embedding
@@ -277,11 +277,11 @@ MLTensor* mlb_clip_layer(MLCtx* C, MLTensor* x,
 	mlctx_block_begin(C);
 	// x: [N, n_token, d_model]
 
-	x = MLN("layer_norm1", mlb_nn_layer_norm(C, x, true, true, 0));
-	x = MLN("self_attn", mlb_attn_mhead(C, x,x,x,
+	x = MLN("norm1", mlb_nn_layer_norm(C, x, true, true, 0));
+	x = MLN("attn", mlb_attn_mhead(C, x,x,x,
 		d_model, d_model, n_head, mask, true, true));
 	x0 = x = ggml_add(C->cc, x0, x);
-	x = MLN("layer_norm2", mlb_nn_layer_norm(C, x, true, true, 0));
+	x = MLN("norm2", mlb_nn_layer_norm(C, x, true, true, 0));
 	x = MLN("mlp", mlb_clip_mlp(C, x, d_model, n_interm));
 	x = ggml_add(C->cc, x0, x);
 	return x;
@@ -309,7 +309,7 @@ MLTensor* mlb_clip_text(MLCtx* C, MLTensor* x, MLTensor* cust_emb_w,
 	mlctx_block_begin(C);
 	// x: [N, n_token]
 
-	x = MLN("embeddings", mlb_clip_embeddings(C, x, cust_emb_w,
+	x = MLN("embed", mlb_clip_embeddings(C, x, cust_emb_w,
 		P->d_embed, P->n_vocab, P->n_token));
 	// [N, n_token, d_embed]
 
@@ -320,7 +320,7 @@ MLTensor* mlb_clip_text(MLCtx* C, MLTensor* x, MLTensor* cust_emb_w,
 	// [N, n_token, d_embed]
 
 	if (norm)
-		x = MLN("final_layer_norm", mlb_nn_layer_norm(C, x, true, true, 0));
+		x = MLN("ln_final", mlb_nn_layer_norm(C, x, true, true, 0));
 	// [N, n_token, d_embed]
 
 	return x;
@@ -334,7 +334,7 @@ MLTensor* mlb_clip_text_proj(MLCtx* C, MLTensor* x, int i_tok_end)
 	int d_embed = x->ne[0],
 	    n_proj = d_embed;  //always good?
 
-	MLTensor *p = MLN("text_projection",
+	MLTensor *p = MLN("text_proj",
 		ggml_new_tensor_2d(C->cp, GGML_TYPE_F32, n_proj, d_embed));
 	p = ggml_cont(C->cc, ggml_transpose(C->cc, p));
 

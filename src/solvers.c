@@ -97,6 +97,7 @@ x_{i+1} = x_i + dx_i dt_i + (1/2) dx2_i dt_i^2 + (1/6) dx3_i dt_i^3
 
 dx2_i = (dx_i - dx_{i-1}) / dt_{i-1}
 dx3_i = (dx2_i - dx2_{i-1}) / dt_{i-1}
+      = (dx_i - dx_{i-1}) / dt_{i-1}^2 - (dx_{i-1} - dx_{i-2}) / (dt_{i-1} dt_{i-2})
  */
 int solver_taylor3_step(Solver* S, float t, LocalTensor* x)
 {
@@ -113,7 +114,7 @@ int solver_taylor3_step(Solver* S, float t, LocalTensor* x)
 	ltensor_for(*x,i,0) x->d[i] += S->dx.d[i] * dt;
 	
 	// 2nd and 3nd order corrections
-	float idtp = 1 / dt_prev[0],
+	float idtp = S->i_step >= 1 ? 1 / dt_prev[0] : 0,
 	      f2 = S->i_step >= 1 ? dt*dt/2 : 0,
 		  f3 = S->i_step >= 2 ? dt*dt*dt/6 : 0;
 	ltensor_for(*x,i,0) {

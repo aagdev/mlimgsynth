@@ -98,18 +98,21 @@ MLTensor* mlb_kl_encoder(MLCtx* C, MLTensor* x,
 		}
 	}
 	// x: [N, ch_blk, h/8, w/8]
+	//x = ggml_debug4_print(C->cc, x, "vae enc down");
 	
 	// middle
 	x = MLN("mid.block_1", mlb_resnet(C, x, NULL, ch_blk));
 	x = MLN("mid.attn_1", mlb_attn_2d_self(C, x));
 	x = MLN("mid.block_2", mlb_resnet(C, x, NULL, ch_blk));
 	// x: [N, ch_blk, h/8, w/8]
+	//x = ggml_debug4_print(C->cc, x, "vae enc mid");
 	
 	// end
 	x = MLN("norm_out", mlb_nn_groupnorm32(C, x));
     x = ggml_silu_inplace(C->cc, x);  // nonlinearity/swish
 	x = MLN("conv_out", mlb_nn_conv2d(C, x, ch_out, 3,3, 1,1, 1,1, 1,1, T));
     // x: [N, ch_out, h/8, w/8]
+	//x = ggml_debug4_print(C->cc, x, "vae enc end");
 	
 	return x;
 }
@@ -222,15 +225,20 @@ int sdvae_encode(MLCtx* C, const VaeParams* P,
 	int R=1;
 	LocalTensor ltmp={0}, itmp={0};
 	
-	TRY( ltensor_shape_check_log(img, "img", 0,0,3,1) );
+	const int f = P->f_down,  //latent to image scale (8 for SD)
+	          k = f*8;  //overlap margin to prevent border effects when tiling
+
+	if (!(img->s[0]%f==0 && img->s[1]%f==0 && img->s[2]==3 && img->s[3]==1))
+		ERROR_LOG(-1, "invalid input image shape: " LT_SHAPE_FMT,
+			LT_SHAPE_UNPACK(*img));
+	
 	int img_n0 = img->s[0],  n0 = img_n0,
 		img_n1 = img->s[1],  n1 = img_n1;
 
 	if (tile_px > 0) {
 		tile_px = ((tile_px + 63) / 64) * 64;  //rounding up
-		//+2 = overlap to prevent border effects
-		n0 = ccMIN( tile_px +P->f_down*2, img_n0 );  
-		n1 = ccMIN( tile_px +P->f_down*2, img_n1 );
+		n0 = ccMIN( tile_px +k*2, img_n0 );  
+		n1 = ccMIN( tile_px +k*2, img_n1 );
 		if (n0 == img_n0 && n1 == img_n1)  //one tile
 			tile_px = 0;  //disable
 	};
@@ -241,15 +249,13 @@ int sdvae_encode(MLCtx* C, const VaeParams* P,
 	MLTensor *input = mlctx_input_new(C, "img", GGML_TYPE_F32, n0, n1, 3, 1);
 	MLTensor *output = mlb_sdvae_encoder(C, input, P);
 	TRY( mlctx_prep(C) );
-		
 
 	if (tile_px > 0) {
 		double t = timing_time();
-		int f = P->f_down,  //latent to image scale (8 for SD)
-		    lat_n0  = img_n0 / f,
+		int lat_n0  = img_n0 / f,
 		    lat_n1  = img_n1 / f,
-			step0  = n0 - f*2,  //overlapping
-			step1  = n1 - f*2,
+			step0  = n0 - k*2,  //overlapping
+			step1  = n1 - k*2,
 			n_tile0 = (img_n0 + step0 - 1) / step0,
 			n_tile1 = (img_n1 + step1 - 1) / step1,
 			n_tile  = n_tile0 * n_tile1,
@@ -275,11 +281,12 @@ int sdvae_encode(MLCtx* C, const VaeParams* P,
 				if (i_tile > 0) C->c.quiet = true;
 				TRY( mlctx_compute(C) );
 				ltensor_from_backend(&itmp, output);
+				log_debug3_ltensor(&itmp, "vae enc");
 				
-				int d0 = i0 ? 1 : 0,
-				    d1 = i1 ? 1 : 0;
-				ltensor_copy_slice2(&ltmp, &itmp, n0/f-1, n1/f-1,
-					i0/f+d0,i1/f+d1, d0,d1, 1,1, 1,1);
+				int d0 = i0 ? k : 0,
+				    d1 = i1 ? k : 0;
+				ltensor_copy_slice2(&ltmp, &itmp, (n0-k)/f, (n1-k)/f,
+					(i0+d0)/f,(i1+d1)/f, d0/f,d1/f, 1,1, 1,1);
 			}
 		}
 
@@ -298,6 +305,8 @@ int sdvae_encode(MLCtx* C, const VaeParams* P,
 		// Get output
 		ltensor_from_backend(latent, output);
 	}
+	
+	log_debug2_ltensor(latent, "vae enc");
 
 end:
 	C->c.quiet = false;
@@ -320,11 +329,13 @@ int sdvae_decode(MLCtx* C, const VaeParams* P,
 	int lat_n0 = latent->s[0],  n0 = lat_n0,
 		lat_n1 = latent->s[1],  n1 = lat_n1;
 	
+	const int f = P->f_down,  //latent to image scale (8 for SD)
+	          k = 8;  //overlap margin to prevent border effects when tiling
+
 	if (tile_px > 0) {
 		tile_px = ((tile_px + 63) / 64) * 64;  //rounding up
-		//+2 = overlap to prevent border effects
-		n0 = ccMIN( tile_px/P->f_down +2, lat_n0 );  
-		n1 = ccMIN( tile_px/P->f_down +2, lat_n1 );
+		n0 = ccMIN( tile_px/f +k*2, lat_n0 );  
+		n1 = ccMIN( tile_px/f +k*2, lat_n1 );
 		if (n0 == lat_n0 && n1 == lat_n1)  //one tile
 			tile_px = 0;  //disable
 	};
@@ -338,11 +349,11 @@ int sdvae_decode(MLCtx* C, const VaeParams* P,
 
 	if (tile_px > 0) {
 		double t = timing_time();
-		int f = P->f_down,  //latent to image scale (8 for SD)
+		int f = P->f_down,  
 		    img_n0  = lat_n0 * f,
 		    img_n1  = lat_n1 * f,
-			step0  = n0 - 2,  //overlapping
-			step1  = n1 - 2,
+			step0  = n0 - k*2,  //overlapping
+			step1  = n1 - k*2,
 			n_tile0 = (lat_n0 + step0 - 1) / step0,
 			n_tile1 = (lat_n1 + step1 - 1) / step1,
 			n_tile  = n_tile0 * n_tile1,
@@ -367,11 +378,12 @@ int sdvae_decode(MLCtx* C, const VaeParams* P,
 				if (i_tile > 0) C->c.quiet = true;
 				TRY( mlctx_compute(C) );
 				ltensor_from_backend(&ltmp, output);
+				log_debug3_ltensor(&ltmp, "vae dec");
 				
-				int d0 = i0 ? f : 0,
-				    d1 = i1 ? f : 0;
-				ltensor_copy_slice2(&itmp, &ltmp, (n0-1)*f, (n1-1)*f,
-					i0*f+d0,i1*f+d1, d0,d1, 1,1, 1,1);
+				int d0 = i0 ? k : 0,
+				    d1 = i1 ? k : 0;
+				ltensor_copy_slice2(&itmp, &ltmp, (n0-k)*f, (n1-k)*f,
+					(i0+d0)*f,(i1+d1)*f, d0*f,d1*f, 1,1, 1,1);
 			}
 		}
 
@@ -391,6 +403,7 @@ int sdvae_decode(MLCtx* C, const VaeParams* P,
 	}
 	
 	sdvae_decoder_post(img, img);
+	log_debug2_ltensor(img, "vae dec");
 
 end:
 	C->c.quiet = false;

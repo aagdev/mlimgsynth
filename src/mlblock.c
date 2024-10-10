@@ -41,6 +41,10 @@ void mlctx_free(MLCtx* C)
 		C->cp = NULL;
 		C->graph = NULL;
 	}
+
+	//TODO: separate resettable options
+	//C->c.multi_compute = false;
+	//C->c.quiet = false;
 }
 
 void mlctx_begin(MLCtx* C, const char* name)
@@ -303,6 +307,7 @@ end:
 
 int mlctx_prep(MLCtx* C)
 {
+	TRYRB(-1, vec_count(C->tensors) > 0);
 	MLTensor *result = vec_last(C->tensors,0).tensor;
 	if (C->tprefix) mlctx_tensor_add(C, C->tprefix, result);
 	TRYR( mlctx_build_alloc(C, result) );

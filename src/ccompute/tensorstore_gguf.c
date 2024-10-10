@@ -51,14 +51,13 @@ int gguf_read_string(Stream* stm, Allocator* al, Any* out, uint64_t limit)
 }
 
 static
-int gguf_read_key(Stream* stm, Allocator* al, StringStore* ss, const char** pname)
+int gguf_read_key(Stream* stm, Allocator* al, StringStore* ss, DynStr* pname)
 {
 	Any key={0};
 	TRYR( gguf_read_string(stm, al, &key, 256) );
 	TRYRB( TS_E_FORMAT, key.len > 0 );
-	*pname = key.p.cp;
-	assert( al->ctx == &ss->al );
-	return strsto_add2(ss, strsl_froma(key), -1, true);
+	dstr_copy(*pname, key.len, key.p.cp);
+	return 1;
 }
 
 static
@@ -169,10 +168,10 @@ end:
 	return R;
 }
 
-int tstore_read_gguf(TensorStore* S, Stream* stm)
+int tstore_read_gguf(TensorStore* S, Stream* stm, TSCallback* cb)
 {
-	int R=1, key;
-	const char* name=NULL;
+	int R=1, r;
+	DynStr name=NULL;
 	Allocator al = allocator_arena(&S->ss->al);
 	
 	// Header
@@ -204,18 +203,21 @@ int tstore_read_gguf(TensorStore* S, Stream* stm)
 
 	// Metadata
 	for (uint64_t i=0; i<n_meta; ++i) {
-		TRY( key = gguf_read_key(stm, &al, S->ss, &name) );
+		TRY( gguf_read_key(stm, &al, S->ss, &name) );
 		Any value={0};
 		TRY( gguf_read_meta(stm, &al, &value, name) );
-		TRY( tstore_meta_addk(S, key, &value) );
+		TRY( tstore_meta_add(S, name, &value) );
 	}
 	
 	// Tensors
 	for (uint64_t i=0; i<n_tensor; ++i) {
-		TRY( key = gguf_read_key(stm, &al, S->ss, &name) );
+		TRY( gguf_read_key(stm, &al, S->ss, &name) );
 		TSTensorEntry e={0};
 		TRY( gguf_read_tensor(stm, &e, name) );
-		TRY( tstore_tensor_addk(S, key, &e) );
+		TRY( r = tstore_cb_call(cb, S, &e, &name) );
+		if (r > 0) {
+			TRY( tstore_tensor_add(S, name, &e) );
+		}
 	}
 
 	uint64_t offset = stream_pos_get(stm);

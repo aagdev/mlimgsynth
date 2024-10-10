@@ -83,6 +83,7 @@ TSDTypeAttr g_tstore_dtype_attr[TS_DTYPE__END] = {
 	{ "f64" ,   8,   1, GGML_TYPE_F64 , -1, true },
 	{ "f32" ,   4,   1, GGML_TYPE_F32 , MDA_DT_F32 , true },
 	{ "f16" ,   2,   1, GGML_TYPE_F16 , MDA_DT_F16 , true },
+	{ "bf16",   2,   1, GGML_TYPE_BF16, -1, true },
 	{ "i64" ,   8,   1, GGML_TYPE_I64 , -1, true },
 	{ "i32" ,   4,   1, GGML_TYPE_I32 , MDA_DT_I32 , true },
 	{ "i16" ,   2,   1, GGML_TYPE_I16 , -1, true },
@@ -183,12 +184,22 @@ static
 int data_convert(int dtype, int stype, size_t n, void* dst, const void* src)
 {
 #ifdef TENSORSTORE_USE_GGML
+	//TODO: one ggml_init is required for some of this to work
 	const TSDTypeAttr *dta = tstore_dtype_attr(dtype);
 	if (dtype == TS_DTYPE_F32 && stype == TS_DTYPE_F16) {
 		ggml_fp16_to_fp32_row(src, dst, n);
 	}
 	else if (dtype == TS_DTYPE_F16 && stype == TS_DTYPE_F32) {
 		ggml_fp32_to_fp16_row(src, dst, n);
+	}
+	else if (dtype == TS_DTYPE_F32 && stype == TS_DTYPE_BF16) {
+		ggml_bf16_to_fp32_row(src, dst, n);
+	}
+	else if (dtype == TS_DTYPE_F16 && stype == TS_DTYPE_BF16) {
+		void *tmp = alloc_alloc(TENSORSTORE_ALLOCATOR, n*4);
+		ggml_bf16_to_fp32_row(src, tmp, n);
+		ggml_fp32_to_fp16_row(tmp, dst, n);
+		alloc_free(TENSORSTORE_ALLOCATOR, tmp);
 	}
 	else if (dtype == TS_DTYPE_F32 && stype == TS_DTYPE_F64) {
 		for (size_t i=0; i<n; ++i)
@@ -239,8 +250,12 @@ int tstore_tensor_data_get(TSTensorEntry* S, TSDType dtype, int flags,
 	TSTensorData* out)
 {
 	int R=1;
-	bool f_perm = flags & TSTDG_F_PERM;
+	const bool f_perm  = flags & TSTDG_F_PERM;
+	const bool f_write = flags & TSTDG_F_WRITE;
+
+	tstore_tdata_free(out);
 		
+	//TODO: write flag?
 	BISECT_RIGHT_DECL(found, idx, 0, vec_count(S->cache),
 		S->cache[i_].dtype - dtype);
 	if (found) {
@@ -251,16 +266,16 @@ int tstore_tensor_data_get(TSTensorEntry* S, TSDType dtype, int flags,
 	TRY_LOG( stream_seek(S->stm, S->offset, 0), "seek to %"PRIu64, S->offset );
 	if (stream_read_prep(S->stm, S->size) < S->size)
 		ERROR_LOG(-1, "read %"PRIu64" bytes", S->size);
-	const void *cur = stream_buffer_get(S->stm, NULL);
+	void *cur = stream_buffer_get(S->stm, NULL);
 
 	//TODO: configure required alignment
 	bool f_aligned = ALIGNMENT_CHECK(cur, 32);
 
 	if (dtype == S->dtype) {  //direct
-		if (stream_mmap_is(S->stm) && f_aligned) {
+		if (stream_mmap_is(S->stm) && f_aligned && !f_write) {
 			*out = (TSTensorData){ dtype, cur, S->size, .perm=true };
 		}
-		else if (f_perm || !f_aligned) {
+		else if (f_perm || !f_aligned || f_write) {
 			size_t sz = S->size;
 			void *data = alloc_alloc(TENSORSTORE_ALLOCATOR, sz);
 			memcpy(data, cur, sz);
@@ -286,7 +301,7 @@ int tstore_tensor_data_get(TSTensorEntry* S, TSDType dtype, int flags,
 		{
 			alloc_free(TENSORSTORE_ALLOCATOR, data);
 			ERROR_LOG(-1, "unsupported conversion from %s to %s",
-				dta->name, sta->name);
+				sta->name, dta->name);
 		}
 
 		*out = (TSTensorData){ dtype, data, sz, .ownmem=true, .perm=f_perm };
@@ -370,7 +385,8 @@ const TensorStoreFormat* tstore_format_detect(Stream* stm)
 	return NULL;
 }
 
-int tstore_read(TensorStore* S, Stream* stm, const TensorStoreFormat* fmt)
+int tstore_read(TensorStore* S, Stream* stm, const TensorStoreFormat* fmt,
+	TSCallback* cb)
 {
 	if (!fmt) {
 		fmt = tstore_format_detect(stm);
@@ -380,13 +396,14 @@ int tstore_read(TensorStore* S, Stream* stm, const TensorStoreFormat* fmt)
 		}
 	}
 	if (!fmt->read) return TS_E_FORMAT;
-	return fmt->read(S, stm);
+	return fmt->read(S, stm, cb);
 }
 
-int tstore_write(TensorStore* S, Stream* stm, const TensorStoreFormat* fmt)
+int tstore_write(TensorStore* S, Stream* stm, const TensorStoreFormat* fmt,
+	TSCallback* cb)
 {
 	if (!(fmt && fmt->write)) return TS_E_FORMAT;
-	return fmt->write(S, stm);
+	return fmt->write(S, stm, cb);
 }
 
 int tstore_info_dump(const TensorStore* S, Stream* stm)

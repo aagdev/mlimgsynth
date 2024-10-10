@@ -8,7 +8,11 @@ Generate images using Stable Diffusion (SD) models. This program is completely w
 - SD v2.x: [info](https://github.com/Stability-AI/stablediffusion) [weights](https://huggingface.co/stabilityai/stable-diffusion-2-1)
 - SDXL: [info](https://stability.ai/news/stable-diffusion-sdxl-1-announcement) [weights](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0)
 
-Besides the original weights, you may use any of the fine-tuned checkpoints that can be found on the internet.
+Besides the original weights, you may use any of the fine-tuned checkpoints that can be found on the internet. Destilled models (turbo, hyper, lightning) should work normally.
+
+## Usage on Windows
+
+Download and unzip the latest release. Edit the file `generate.bat` as needed and execute it.
 
 ## Build
 
@@ -27,27 +31,36 @@ By default, the program is linked with `libpng` and `libjpeg` to support those f
 First, download the weights of the model you wish to use. Right now, the only supported format is `safetensors`. To generate an image (txt2img) use:
 
 ```shell
-./mlimgsynth generate -b CUDA0 -m MODEL.safetensors --cfg-scale 7 --steps 20 --seed 42 -o output.png -p "a box on a table"
+./mlimgsynth generate -b Vulkan0 -m MODEL.safetensors --cfg-scale 7 --steps 20 --seed 42 -o output.png -p "a box on a table"
 ```
 
-The option `-b` let's you select from the available backends (by default `CPU` is used).
-
-To start from an initial image (img2img) add the options `-i IMAGE.png` and `--f-t-ini 0.7`. The second option controls the strength by changing the initial time in the denoising process, you may try any value between 0 (no changes) and 1. 
+The option `-b` let's you select from the available backends. Use `Vulkan0` or `CUDA0` for GPU. By default `CPU` is used.
 
 See the script `generate.sh` for a more complete example.
 
 Execute without any arguments to see a list of all the supported options.
 
+### img2img and inpainting
+
+To start from an initial image (img2img) add the options `-i IMAGE.png` and `--f-t-ini 0.7`. The second option controls the strength by changing the initial time in the denoising process, you may try any value between 0 (no changes) and 1. 
+
+If the image has an alpha channel (transparency), it is used as a mask for inpainting.
+
+### Lora's
+
+Lora's can be loaded indivually with the option `--lora PATH:MULT` or with the option `--lora-dir PATH` and adding to the prompt `<lora:NAME:MULT>`. In the last case, it will look for the file `PATH/NAME.safetensors`.
+
 ### TAE
 
-To accelerate and reduce the memory usage during the image decoding, you may use the [TAE](https://github.com/madebyollin/taesd) (tiny autoencoder) in place of the VAE (variational autoencoder) of SD. Download the weights compatible with SD or SDXL, and pass the path to them with the option `--tae TAE.safetensors` to enable it.
+To accelerate and reduce the memory usage during the image decoding, you may use the [TAE](https://github.com/madebyollin/taesd) (tiny autoencoder) in place of the VAE (variational autoencoder) of SD. Download the weights compatible with SD or SDXL, and pass the path to them with the option `--tae TAE.safetensors` to enable it. Be warned that this reduces the final images quality. If you are low on memory, it is preferable to use the `--vae-tile 512` option.
 
-## Limitations and plans
+## Future plans
 
-The following are limitations of the current version that I plan to improve:
-
-- The prompt is limited to 75 tokens and ascii characters. No syntax to change the relative weights is supported (e.g. `a (large) dog`).
-- The sampling methods supported are: `euler`, `heun` and `taylor3` (change with `--method`). The last one is similar to `euler` but with two additional terms for second and third order corrections, this reduces the number of steps required. I plan to implement more methods like the popular DPM family.
+- Allow non-ascii characters in the prompt.
+- Parse parenthesis in the prompt to change relative weights, e.g. `a (large) dog`.
+- Support for GGUF and quantized models.
+- ControlNet
+- Maybe SDE sampling. The biggest hurdle is understanding what it is doing the `torchsde.BrownianTree` used in `k-diffusion`.
 
 ## License
 Most of this program is licensed under the MIT (see the file `LICENSE`), with the exceptions of the files in the directory `src/ccommon` which use the ZLib license (see the file `LICENSE.zlib`). To prevent any confusion, each file indicates its license at the beginning using the SPDX identifier.

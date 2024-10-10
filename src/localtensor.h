@@ -116,9 +116,30 @@ int ltensor_shape_check_log(const LocalTensor* S, const char* desc,
 	return r;
 }
 
+int ltensor_finite_check(const LocalTensor* S);
+
 float ltensor_minmax(const LocalTensor* S, float* min);
 float ltensor_sum(const LocalTensor* S);
 float ltensor_mean(const LocalTensor* S);
+
+typedef struct {
+	float asum, first, min, max;
+	char hash[9];
+	char valid;
+} LocalTensorStats;
+
+LocalTensorStats ltensor_stat(const LocalTensor* S);
+
+void log_ltensor_stats(int loglvl, const LocalTensor* S, const char* desc);
+
+#define log_debug2_ltensor(T, D) \
+	log_ltensor_stats(LOG_LVL_DEBUG2, (T), (D))
+
+#define log_debug3_ltensor(T, D) \
+	log_ltensor_stats(LOG_LVL_DEBUG3, (T), (D))
+
+// Reduces the sizes by the factors
+void ltensor_downsize(LocalTensor* S, int f0, int f1, int f2, int f3);
 
 int ltensor_save_path(const LocalTensor* S, const char* path);
 int ltensor_load_path(LocalTensor* S, const char* path);
@@ -126,13 +147,11 @@ int ltensor_load_path(LocalTensor* S, const char* path);
 void ltensor_from_image(LocalTensor* S, const Image* img);
 void ltensor_to_image(const LocalTensor* S, Image* img);
 
+// Load separately the last channel (usually the transparancy)
+void ltensor_from_image_alpha(LocalTensor* S, LocalTensor* alpha, const Image* img);
+
 int ltensor_img_redblue(const LocalTensor* S, Image* img);
 int ltensor_img_redblue_path(const LocalTensor* S, const char* path);
 
 #define ltensor_for(T,V,I) \
 	for (unsigned V=(I), V##e_=ltensor_nelements(&(T)); V<V##e_; ++V)
-
-void log_ltensor_stats(int loglvl, const LocalTensor* S, const char* desc);
-
-#define log_debug3_ltensor(T, D) \
-	log_ltensor_stats(LOG_LVL_DEBUG3, (T), (D))

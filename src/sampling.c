@@ -21,6 +21,7 @@ if (log_level_check(LVL)) { \
 void dnsamp_free(DenoiseSampler* S)
 {
 	ltensor_free(&S->noise);
+	ltensor_free(&S->x0);
 	solver_free(&S->solver);
 	vec_free(S->sigmas);
 }
@@ -87,16 +88,32 @@ int dnsamp_init(DenoiseSampler* S)
 	//log_debug_vec("Times" , times , i, 0, "%.6g", times[i]);
 	log_debug_vec("Sigmas", S->sigmas, i, 0, "%.6g", S->sigmas[i]);
 	
-	log_info("Generating "
-		"(solver: %s, sched: %s, ancestral: %g, snoise: %g, steps: %d, nfe/s: %d)",
-		id_str(S->c.method), id_str(S->c.sched), S->c.s_ancestral,
-		S->c.s_noise, S->n_step, S->nfe_per_step);
-	
 	S->solver.t = S->sigmas[0];  //initial t
 	S->i_step = 0;
 
 end:
 	return R;
+}
+
+void dnsamp_mask_apply(DenoiseSampler* S, LocalTensor* x)
+{
+	int n0 = x->s[0], n1 = x->s[1], n2 = x->s[2],
+		s1 = n0, s2 = n0*n1;
+	assert( ltensor_shape_check(S->c.lmask, n0, n1, 1, 1) );
+	for (int i2=0; i2<n2; ++i2)
+	for (int i1=0; i1<n1; ++i1)
+	for (int i0=0; i0<n0; ++i0) {
+		float m = S->c.lmask->d[i0 +i1*s1];
+		int i = i0 +i1*s1 +i2*s2;
+		x->d[i] = S->x0.d[i] * m + x->d[i] * (1-m);
+	}
+}
+
+void dnsamp_noise_add(DenoiseSampler* S, LocalTensor* x, float sigma)
+{
+	ltensor_resize_like(&S->noise, x);
+	rng_randn(ltensor_nelements(&S->noise), S->noise.d);
+	ltensor_for(*x,i,0) x->d[i] += S->noise.d[i] * sigma;
 }
 
 int dnsamp_step(DenoiseSampler* S, LocalTensor* x)
@@ -109,6 +126,15 @@ int dnsamp_step(DenoiseSampler* S, LocalTensor* x)
 	float s_up = 0,
 	      s_down = S->sigmas[s+1];
 
+	if (s == 0) {  // Initial tasks
+		if (S->c.lmask) ltensor_copy(&S->x0, x);
+
+		// Add noise to initial latent
+		dnsamp_noise_add(S, x, S->sigmas[0]);
+		if (S->c.lmask) dnsamp_mask_apply(S, x);
+		log_debug3_ltensor(x, "x0+noise");
+	}
+
 	if (S->c.s_noise > 0 && s > 0) {
 		// Stochastic sampling: may help to add detail lost during sampling
 		// Ref.: Karras2022, see Algo2 with S_churn
@@ -118,10 +144,9 @@ int dnsamp_step(DenoiseSampler* S, LocalTensor* x)
 		      s_hat   = s_curr * sqrt(2) * S->c.s_noise,
 			  s_noise = sqrt(s_hat*s_hat - s_curr*s_curr);
 		log_debug("s_noise:%g s_hat:%g", s_noise, s_hat);
-
-		ltensor_resize_like(&S->noise, x);
-		rng_randn(ltensor_nelements(&S->noise), S->noise.d);
-		ltensor_for(*x,i,0) x->d[i] += S->noise.d[i] * s_noise;
+		
+		dnsamp_noise_add(S, x, s_noise);
+		if (S->c.lmask) dnsamp_mask_apply(S, x);
 		S->solver.t = s_hat;
 	}
 		
@@ -144,14 +169,15 @@ int dnsamp_step(DenoiseSampler* S, LocalTensor* x)
 	
 	if (s_up > 0 && s+1 != S->n_step) {
 		// Ancestral sampling
-		ltensor_resize_like(&S->noise, x);
-		rng_randn(ltensor_nelements(&S->noise), S->noise.d);
-		ltensor_for(*x,i,0) x->d[i] += S->noise.d[i] * s_up;
-		
+		dnsamp_noise_add(S, x, s_up);
 		S->solver.t = S->sigmas[s+1];
 	}
+
+	// In-painting mask apply
+	if (S->c.lmask)
+		dnsamp_mask_apply(S, x);
 	
-	log_debug3_ltensor(x, "step latent");
+	log_debug3_ltensor(x, "x");
 
 	S->i_step++;
 end:

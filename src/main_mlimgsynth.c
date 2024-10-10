@@ -11,11 +11,14 @@
 #include "ccompute/tensorstore.h"
 
 #include "localtensor.h"
+#include "mlblock.h"
 #include "tae.h"
 #include "vae.h"
 #include "clip.h"
 #include "unet.h"
+#include "lora.h"
 #include "sampling.h"
+#include "tensor_name_conv.h"
 #include "util.h"
 
 #define IDS_IMPLEMENTATION
@@ -28,7 +31,7 @@
 
 #include <math.h>
 
-#define APP_NAME_VERSION "mlimgsynth v0.2.5"
+#define APP_NAME_VERSION "mlimgsynth v0.3.0"
 
 #define debug_pause() do { \
 	puts("Press ENTER to continue"); \
@@ -76,10 +79,11 @@ APP_NAME_VERSION "\n"
 "  -W INT               Image width. Default: 512 (SD1), 768 (SD2), 1024 (SDXL).\n"
 "  -H INT               Image height. Default: width.\n"
 "  -S --seed INT        RNG seed.\n"
+"  --in-mask PATH       Input image mask for inpainting.\n"
 "\n"
 "  --method NAME        Sampling method (default taylor3).\n"
 "                       euler, euler_a, heun, taylor3, dpm++2m, dpm++2s, dpm++2s_a.\n"
-"                       The _a variants are just a shortcut for --s-ancestral=1.\n"
+"                       The _a variants are just a shortcut for --s-ancestral 1.\n"
 "  --sched NAME         Sampling scheduler: uniform (default), karras.\n"
 "  --s-noise FLOAT      Level of noise injection at each sampling step (try 1).\n"
 "  --s-ancestral FLOAT  Ancestral sampling noise level (try 1).\n"
@@ -96,6 +100,12 @@ APP_NAME_VERSION "\n"
 "                       Reduces memory usage. On doubt, try 512."
 //"  --type NAME          Convert the weight to this tensor type.\n"
 //"                       Useful to quantize and reduce RAM usage (try q8_0).\n"
+"  --lora PATH:MULT     Apply the LoRA from PATH with multiplier MULT.\n"
+"         PATH          The multiplier is optional.\n"
+"                       This option can be used multiple time.\n"
+"  --lora-dir PATH      Directory to search for LoRA's found in the prompt as:\n"
+"                       <lora:NAME:MULT>\n"
+"                       where NAME is the file name without extension.\n"
 "  --dump               Dumps models tensors and graphs.\n"
 "\n"
 "  -q                   Quiet: reduces information output.\n"
@@ -107,7 +117,7 @@ APP_NAME_VERSION "\n"
 
 typedef struct {
 	MLCtx ctx;
-	TensorStore tstore, tstore_tae;
+	TensorStore tstore;
 	Stream stm_model, stm_tae;
 	ClipTokenizer tokr;
 	DenoiseSampler sampler;
@@ -117,16 +127,108 @@ typedef struct {
 	const ClipParams *clip_p, *clip2_p;
 	const UnetParams *unet_p;
 
-	DynStr path_bin, tmps_path;
+	DynStr path_bin, tmps_path, prompt;
+
+	struct {
+		DynStr path;
+		float mult;
+	} *loras;  //vector
 
 	struct {
 		const char *path_model, *path_in, *path_in2, *path_out, *path_tae,
-			*backend, *prompt, *nprompt;
+			*path_inmask, *path_lora_dir, *backend, *prompt, *nprompt;
 		int cmd, n_thread, width, height, seed, clip_skip, vae_tile;
 		float cfg_scale;
 		unsigned dump_info:1, use_tae:1, use_cfg:1, unet_split:1;
 	} c;
 } MLImgSynthApp;
+
+int mlis_args_lora_add(MLImgSynthApp* S, const char* arg)
+{
+	unsigned i = vec_count(S->loras);
+	vec_append_zero(S->loras, 1);
+	dstr_copyz(S->loras[i].path, arg);
+	S->loras[i].mult = 1;
+
+	// Find the last ':'
+	unsigned l = dstr_count(S->loras[i].path);
+	char *b=S->loras[i].path, *c=b+l-1;
+	while (c>=b && *c != ':') c--;
+	if (*c == ':' && c > b+1) {  // windows path have ':' at 2nd position
+		S->loras[i].mult = atof(c+1);
+		dstr_resize(S->loras[i].path, c-b);
+	}
+
+	return 1;
+}
+
+int mlis_lora_path_find(MLImgSynthApp* S, StrSlice name, DynStr *out)
+{
+	//TODO: more sophisticated file search
+	dstr_copyz(*out, S->c.path_lora_dir);
+	if (dstr_count(*out) > 0) {
+		char c = (*out)[dstr_count(*out)-1];
+		if (c != '/' && c != '\\')
+			dstr_push(*out, '/');
+	}
+	dstr_append(*out, name.s, name.b);
+	dstr_appendz(*out, ".safetensors");  //TODO: support other
+	return 1;
+}
+
+int mlis_prompt_cfg_parse(MLImgSynthApp* S, StrSlice ss)
+{
+	int R=1, count=0;
+	if (strsl_prefix_trim(&ss, strsl_static("lora:")))
+	{
+		const char *sep=ss.b, *end=ss.b+ss.s;
+		while (sep < end && *sep != ':') sep++;
+
+		unsigned i = vec_count(S->loras);
+		vec_append_zero(S->loras, 1);
+
+		TRY( mlis_lora_path_find(S, strsl_fromr(ss.b, sep), &S->loras[i].path) );
+		
+		S->loras[i].mult = 1;
+		if (*sep == ':') {  //optional
+			char *tail=NULL;
+			S->loras[i].mult = strtof(sep+1, &tail);
+			if (tail != end) ERROR_LOG(-1, "wrong format");
+		}
+		
+		count++;
+	}
+	else ERROR_LOG(-1, "unknown prompt option");
+
+	if (count > 0) {
+		log_debug("cfg elements in prompt: %d", count);
+		S->c.prompt = S->prompt;
+	}
+
+end:
+	if (R<0) log_error("prompt option '%.*s': %x", (int)ss.s, ss.b, -R);
+	return R;
+}
+
+int mlis_prompt_cfg_extract(MLImgSynthApp* S)
+{
+	if (!S->c.prompt) return 0;
+	int R=1;
+	unsigned n = strlen(S->c.prompt);
+	dstr_realloc(S->prompt, n);  //reserve memory
+	for (const char *cur=S->c.prompt, *end=cur+n; cur<end; ++cur) {
+		if (*cur == '<') {
+			const char *e=cur+1;
+			while (e < end && *e != '>') ++e;
+			if (*e != '>') ERROR_LOG(-1, "prompt: '<' not matched with '>'");
+			TRY( mlis_prompt_cfg_parse(S, strsl_fromr(cur+1, e)) );
+			cur = e;
+		}
+		else dstr_push(S->prompt, *cur);
+	}
+end:
+	return R;
+}
 
 int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 {
@@ -175,6 +277,9 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 			else if (!strcmp(arg+2, "seed" )) {
 				g_rng.seed = strtoull(next, NULL, 10); i++;
 			}
+			else if (!strcmp(arg+2, "in-mask" )) {
+				S->c.path_inmask = next; i++;
+			}
 			else if (!strcmp(arg+2, "cfg-scale" )) {
 				S->c.cfg_scale = atof(next); i++;
 				S->c.use_cfg = S->c.cfg_scale > 1;
@@ -206,6 +311,14 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 					ERROR_LOG(-1, "unknown tensor type '%s'", next);				
 				S->ctx.c.wtype = tstore_dtype_attr(dt)->ggml;
 			}*/
+			else if (!strcmp(arg+2, "lora" )) {
+				TRY( mlis_args_lora_add(S, next) );
+				i++;
+			}
+			else if (!strcmp(arg+2, "lora-dir" )) {
+				S->c.path_lora_dir = next;
+				i++;
+			}
 			else if (!strcmp(arg+2, "dump" )) {
 				S->c.dump_info = true;
 			}
@@ -257,6 +370,8 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 			ERROR_LOG(-1, "Excess of arguments: %s", arg);
 		}
 	}
+
+	IFNPOSSET(S->c.cfg_scale, 1);
 	
 	// Save the path of the direction where the binary is located.
 	// May be used later to look for related files.
@@ -269,8 +384,12 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 		}
 	}
 
+	// RNG seed
 	if (!g_rng.seed) g_rng.seed = timing_timeofday();
-	log_debug("Seed: %zu", g_rng.seed);
+	log_info("Seed: %zu", g_rng.seed);
+
+	// Extract configuration option from the prompt (e.g. loras)
+	TRY( mlis_prompt_cfg_extract(S) );
 
 end:
 	if (print_help) puts(help_string);
@@ -285,13 +404,17 @@ void mlis_free(MLImgSynthApp* S)
 	mlctx_free(&S->ctx);
 	clip_tokr_free(&S->tokr);
 	stream_close(&S->stm_tae, 0);
-	tstore_free(&S->tstore_tae);
 	tstore_free(&S->tstore);
 	stream_close(&S->stm_model, 0);
 	if (S->ctx.backend)
 		ggml_backend_free(S->ctx.backend);
 	if (S->ctx.backend2)
 		ggml_backend_free(S->ctx.backend2);
+
+	dstr_free(S->prompt);
+	vec_for(S->loras,i,0)
+		dstr_free(S->loras[i].path);
+	vec_free(S->loras);
 }
 
 int mlis_file_find(MLImgSynthApp* S, const char *name, const char **path)
@@ -314,246 +437,144 @@ end:
 	return R;
 }
 
-typedef struct TSNameConvEntry {
-	const char *prefix, *replace;
-	const struct TSNameConvEntry *sub;  //sub rules
-	char skip_until;
-} TSNameConvEntry;
-
-#define TSNCSub  (const TSNameConvEntry[])
-
-const TSNameConvEntry g_tnconv_oclip[] = {  //clip.text.
-	{"transformer.resblocks.", "encoder.layers.", .skip_until='.',
-	.sub=TSNCSub{
-		{"attn.out_proj.", "self_attn.out_proj."},
-		{"ln_1.", "layer_norm1."},
-		{"ln_2.", "layer_norm2."},
-		{"mlp.c_fc.", "mlp.fc1."},
-		{"mlp.c_proj.", "mlp.fc2."},
-		{}, //end mark
-	}},
-	{"positional_embedding", "embeddings.position_embedding.weight"},
-	{"token_embedding.", "embeddings.token_embedding."},
-	{"ln_final.", "final_layer_norm."},
-	{}, //end mark
-};
-
-const TSNameConvEntry g_tensor_name_conv[] = {
-	//SD1
-	{"cond_stage_model.", "clip.", .sub=TSNCSub{
-		{"transformer.text_model.", "text."},
-		//SD2
-		{"model.", "text.", .sub=g_tnconv_oclip},
-		{}, //end mark
-	}},
-	{"first_stage_model.", "vae."},
-	{"model.diffusion_model.", "unet."},
-
-	//SDXL
-	{"conditioner.embedders.0.", "clip.", .sub=TSNCSub{
-		{"transformer.text_model.", "text."},
-		{}, //end mark
-	}},
-	{"conditioner.embedders.1.model.", "clip2.text.", .sub=g_tnconv_oclip},
-	{}, //end mark
-};
-
-int dstr_replace(DynStr* s, const char* p, const char* r)
-{
-	if (!p || !p[0]) return 0;
-	unsigned slen = dstr_count(*s),
-	         plen = strlen(p),
-	         rlen = r ? strlen(r) : 0;
-	int nrep=0;
-	for (unsigned is=0, ip=0; is<slen; ++is) {
-		if ((*s)[is] == p[ip]) {
-			ip++;
-			if (ip == plen) {
-				ip=0;
-				is++;
-				if (plen > rlen) {
-					is -= plen-rlen;
-					dstr_remove(*s, is, plen-rlen);
-					slen -= plen-rlen;
-				}
-				else if (plen < rlen) {
-					dstr_insert(*s, is, rlen-plen, NULL);
-					is += rlen-plen;
-					slen += rlen-plen;
-				}
-				if (rlen > 0)
-					memcpy(*s+is-rlen, r, rlen);
-				nrep++;
-				is--;
-			}
-		}
-		else ip=0;  //TODO: p with repetitions (i.g. abb in aabbcc)
-	}
-	return nrep;
-}
-
 static
-int tensor_name_convert(DynStr* name)
+int open_clip_attn_conv(TensorStore* ts, const TSTensorEntry *e, const char* name)
 {
-	const TSNameConvEntry *conv=g_tensor_name_conv, *conv_next;
-	unsigned icur=0;
-	while (conv) {
-		conv_next = NULL;
-		unsigned i, p;
-		const char *nm = *name + icur;
-		for (i=0; conv[i].prefix; ++i) {
-			const TSNameConvEntry *e = &conv[i];
-			bool match = true;
-			if (e->prefix) {
-				for (p=0; e->prefix[p] == nm[p] && e->prefix[p]; ++p);
-				match = (e->prefix[p] == 0);
-			}
-			if (match) {
-				if (e->replace) {
-					dstr_remove(*name, icur, p);
-					dstr_insertz(*name, icur, e->replace);
-					p = strlen(e->replace);
-				}
-				icur += p;
-				if (e->skip_until) {
-					nm = *name;
-					while (nm[icur] && nm[icur] != e->skip_until) icur++;
-					if (nm[icur]) icur++;
-				}
-				conv_next = e->sub;
-				break;
-			}
-		}
-		conv = conv_next;
-	}
-
-	//TODO: restrict better
-	//TODO: multi-replace op
-	//unet attn_mhead
-	if (dstr_replace(name, ".to_q.", ".q_proj.")) ;
-	else if (dstr_replace(name, ".to_k.", ".k_proj.")) ;
-	else if (dstr_replace(name, ".to_v.", ".v_proj.")) ;
-	else if (dstr_replace(name, ".to_out.0.", ".out_proj.")) ;
-	//unet resnet
-	else if (dstr_replace(name, ".in_layers.0.", ".norm1.")) ;
-	else if (dstr_replace(name, ".in_layers.2.", ".conv1.")) ;
-	else if (dstr_replace(name, ".out_layers.0.", ".norm2.")) ;
-	else if (dstr_replace(name, ".out_layers.3.", ".conv2.")) ;
-	else if (dstr_replace(name, ".out_layers.3.", ".conv2.")) ;
-	else if (dstr_replace(name, ".emb_layers.1.", ".emb_proj.")) ;
-	else if (dstr_replace(name, ".skip_connection.", ".skip_conv.")) ;
-	//vae resnet
-	else if (dstr_replace(name, ".nin_shortcut.", ".skip_conv.")) ;
-
-	return 0;
-}
-
-static
-int open_clip_attn_conv(TensorStore* ts, const TSTensorEntry *e,
-	const DynStr name)
-{
-	int R=1;
-	DynStr tmps=NULL;
 	TSTensorEntry new={0};
-	unsigned nlen = dstr_count(name);
+	DynStr tmps = dstr_stack(128);
+	StrSlice ss = strsl_fromz(name);
 
-	if (nlen >= 20 && !memcmp(name, "clip", 4) &&
-		(name[4] == '.' || (name[4] == '2' && name[5] == '.')) )
-	{
-		if (!memcmp(name+nlen-18, ".attn.in_proj_bias", 18))
-		{
-			if (!(e->shape_n==1 && e->shape[0] % 3 == 0))
-				ERROR_LOG(-1, "invalid open_clip tensor '%s'", name);
-			new = *e;
-			new.shape[0] /= 3;
-			new.size /= 3;
-			nlen -= 18;
-			
-			dstr_copy(tmps, nlen, name);
-			dstr_appendz(tmps, ".self_attn.q_proj.bias");
-			tstore_tensor_add(ts, tmps, &new);
-			new.offset += new.size;
-			
-			dstr_copy(tmps, nlen, name);
-			dstr_appendz(tmps, ".self_attn.k_proj.bias");
-			tstore_tensor_add(ts, tmps, &new);
-			new.offset += new.size;
-			
-			dstr_copy(tmps, nlen, name);
-			dstr_appendz(tmps, ".self_attn.v_proj.bias");
-			tstore_tensor_add(ts, tmps, &new);
-		}
-		else if (!memcmp(name+nlen-20, ".attn.in_proj_weight", 20))
-		{
-			if (!(e->shape_n==2 && e->shape[1] % 3 == 0))
-				ERROR_LOG(-1, "invalid open_clip tensor '%s'", name);
-			new = *e;
-			new.shape[1] /= 3;
-			new.size /= 3;
-			nlen -= 20;
-			
-			dstr_copy(tmps, nlen, name);
-			dstr_appendz(tmps, ".self_attn.q_proj.weight");
-			tstore_tensor_add(ts, tmps, &new);
-			new.offset += new.size;
-			
-			dstr_copy(tmps, nlen, name);
-			dstr_appendz(tmps, ".self_attn.k_proj.weight");
-			tstore_tensor_add(ts, tmps, &new);
-			new.offset += new.size;
-			
-			dstr_copy(tmps, nlen, name);
-			dstr_appendz(tmps, ".self_attn.v_proj.weight");
-			tstore_tensor_add(ts, tmps, &new);
-		}
+	const char *type;
+	if (strsl_suffixz_trim(&ss, "in_proj_bias")) type = "bias";
+	else if (strsl_suffixz_trim(&ss, "in_proj_weight")) type = "weight";
+	else return 0;
+
+	unsigned idim = e->shape[1] == 1 ? 0 : 1;
+
+	if (!(e->shape[idim] % 3 == 0)) {
+		log_error("invalid open_clip tensor '%s'", name);
+		return -1;
 	}
 
-end:
-	return R;
+	new = *e;
+	new.shape[idim] /= 3;
+	new.size /= 3;
+	
+	dstr_copy(tmps, ss.s, ss.b);
+	dstr_appendz(tmps, "q_proj.");
+	dstr_appendz(tmps, type);
+	tstore_tensor_add(ts, tmps, &new);
+	new.offset += new.size;
+	
+	dstr_copy(tmps, ss.s, ss.b);
+	dstr_appendz(tmps, "k_proj.");
+	dstr_appendz(tmps, type);
+	tstore_tensor_add(ts, tmps, &new);
+	new.offset += new.size;
+	
+	dstr_copy(tmps, ss.s, ss.b);
+	dstr_appendz(tmps, "v_proj.");
+	dstr_appendz(tmps, type);
+	tstore_tensor_add(ts, tmps, &new);
+
+	return 1;
 }
 
 static
-int mlis_tstore_normalize(TensorStore* ts)
+int tensor_callback_main(void* user, TensorStore* ts, TSTensorEntry* te,
+	DynStr* pname)
 {
-	int R=1;
-	DynStr name=NULL;
+	int r;
+	DynStr newname = dstr_stack(128);
 
-	vec_for(ts->tensors,i,0) {
-		TSTensorEntry *e = &ts->tensors[i];
+	// Rename tensors to uniform names
+	TRYR( r = tnconv_sd(strsl_fromd(*pname), &newname) );
+	if (r == 0) {  //unused
+		log_debug2("unused tensor '%s'", *pname);
+		return 0;
+	}
 
-		// Rename tensors to uniform names
-		dstr_copyz(name, id_str(e->key));
-		TRY( tensor_name_convert(&name) );
-		e->key = id_fromz(name);
-
+	if (r == TNCONV_R_QKV_PROJ) {
 		// Convert from openclip attention projection in one tensor
 		// to three tensors.
-		TRY( open_clip_attn_conv(ts, e, name) );
+		TRYR( open_clip_attn_conv(ts, te, newname) );
+		return 0;  //do not save the original tensor
 	}
 
-	TRY( tstore_tensor_index_remake(ts) );
+	dstr_copyd(*pname, newname);
+	return 1;
+}
+
+static
+int tensor_callback_prefix_add(void* user, TensorStore* ts, TSTensorEntry* te,
+	DynStr* pname)
+{
+	const char *prefix = user;
+	if (prefix)
+		dstr_insertz(*pname, 0, prefix);
+	return 1;
+}
+
+static
+int tensor_callback_lora(void* user, TensorStore* ts, TSTensorEntry* te,
+	DynStr* pname)
+{
+	int r;
+	DynStr newname = dstr_stack(128);
+	StrSlice ss = strsl_fromd(*pname);
+	
+	// Check and remove prefix
+	if (!strsl_prefix_trim(&ss, strsl_static("lora_"))) return 0;
+
+	// Rename tensors to uniform names
+	TRYR( r = tnconv_sd(ss, &newname) );
+	if (r == 0) {
+		if (strsl_endswith(ss, strsl_static(".lora_down.weight"))) {
+			log_error("unmatched lora tensor: %s", *pname);
+			return -1;
+		} else {
+			log_debug2("unused lora tensor: %s", *pname);
+			return 0;
+		}
+	}
+
+	dstr_copyd(*pname, newname);
+	return 1;
+}
+
+int mlis_lora_load_apply(MLImgSynthApp* S, const char* path, float mult)
+{
+	int R=1;
+	Stream stm={0};
+	TensorStore ts={ .ss=&g_ss };
+
+	log_debug("lora apply: '%s' %g", path, mult);
+
+	TRY_LOG( stream_open_file(&stm, path, SOF_READ | SOF_MMAP),
+		"could not open '%s'", path);
+
+	TSCallback cb = { tensor_callback_lora };
+	TRY( tstore_read(&ts, &stm, NULL, &cb) );
+	
+	if (S->c.dump_info)
+		TRY( tstore_info_dump_path(&ts, "dump-tensors-lora.txt") );
+
+	TRY( lora_apply(&S->tstore, &ts, mult, &S->ctx) );
 
 end:
-	dstr_free(name);
+	if (R<0) log_error("lora apply '%s': %x", path, -R);
 	return R;
 }
 
-int mlis_ml_init(MLImgSynthApp* S)
+int mlis_backend_init(MLImgSynthApp* S)
 {
 	int R=1;
-	double t;
-	assert(!S->ctx.backend);
-	
-	S->ctx.tstore = &S->tstore;
-	S->ctx.ss = &g_ss;
-	S->tstore.ss = &g_ss;
-	S->tstore_tae.ss = &g_ss;
 
-	// Backend init
 	if (S->c.backend && S->c.backend[0])
 		S->ctx.backend = ggml_backend_reg_init_backend_from_str(S->c.backend);	
 	else 
 		S->ctx.backend = ggml_backend_cpu_init();
+	
 	if (!S->ctx.backend) ERROR_LOG(-1, "ggml backend init");
 	log_info("Backend: %s", ggml_backend_name(S->ctx.backend));
 
@@ -565,24 +586,32 @@ int mlis_ml_init(MLImgSynthApp* S)
 #if USE_GGML_SCHED
 	else
 	{
+		log_debug("Fallback backend CPU");
 		S->ctx.backend2 = ggml_backend_cpu_init();
 		if (!S->ctx.backend2) ERROR_LOG(-1, "ggml fallback backend CPU init");
-		log_debug("Fallback backend CPU");
+		
 		if (S->c.n_thread)
 			ggml_backend_cpu_set_n_threads(S->ctx.backend2, S->c.n_thread);
 	}
 #endif
 
-	// Model parameters header load
-	t = timing_time();
+end:
+	return R;
+}
+
+int mlis_model_load(MLImgSynthApp* S)
+{
+	int R=1;
+
+	double t = timing_time();
 	if (S->c.path_model) {
 		log_debug("Loading model header from '%s'", S->c.path_model);
 		TRY_LOG( stream_open_file(&S->stm_model, S->c.path_model,
 			SOF_READ | SOF_MMAP),
 			"could not open '%s'", S->c.path_model);
 		log_debug("model stream class: %s", S->stm_model.cls->name);
-		TRY( tstore_read(&S->tstore, &S->stm_model, NULL) );
-		TRY( mlis_tstore_normalize(&S->tstore) );
+		TSCallback cb = { tensor_callback_main };
+		TRY( tstore_read(&S->tstore, &S->stm_model, NULL, &cb) );
 	}
 
 	// TAE model load
@@ -591,7 +620,8 @@ int mlis_ml_init(MLImgSynthApp* S)
 		TRY_LOG( stream_open_file(&S->stm_tae, S->c.path_tae,
 			SOF_READ | SOF_MMAP),
 			"could not open '%s'", S->c.path_tae);
-		TRY( tstore_read(&S->tstore_tae, &S->stm_tae, NULL) );
+		TSCallback cb = { tensor_callback_prefix_add, "tae." };
+		TRY( tstore_read(&S->tstore, &S->stm_tae, NULL, &cb) );
 	}
 
 	t = timing_time() - t;
@@ -600,11 +630,18 @@ int mlis_ml_init(MLImgSynthApp* S)
 	if (S->c.dump_info)
 		TRY( tstore_info_dump_path(&S->tstore, "dump-tensors.txt") );
 
-	// Identify model type
+end:
+	return R;
+}
+
+int mlis_model_ident(MLImgSynthApp* S)
+{
+	int R=1;
 	const char *model_type=NULL;
 	const TSTensorEntry *te=NULL;
+
 	if ((te = tstore_tensor_get(&S->tstore,
-		"unet.input_blocks.1.1.transformer_blocks.0.attn2.k_proj.weight")))
+		"unet.in.1.1.transf.0.attn2.k_proj.weight")))
 	{
 		if (te->shape[0] == 768) {
 			model_type = "Stable Diffusion 1.x";
@@ -628,7 +665,7 @@ int mlis_ml_init(MLImgSynthApp* S)
 		}
 	}
 	else if ((te = tstore_tensor_get(&S->tstore,
-		"unet.input_blocks.4.1.transformer_blocks.0.attn2.k_proj.weight")))
+		"unet.in.4.1.transf.0.attn2.k_proj.weight")))
 	{
 		if (te->shape[0] == 2048) {
 			model_type = "Stable Diffusion XL";
@@ -643,10 +680,43 @@ int mlis_ml_init(MLImgSynthApp* S)
 		}
 	}
 
-	if (model_type)
-		log_info("Model type: %s", model_type);
-	else
+	if (!model_type)
 		ERROR_LOG(-1, "Unknown model type");
+	
+	log_info("Model type: %s", model_type);
+	
+end:
+	return R;
+}
+
+int mlis_ml_init(MLImgSynthApp* S)
+{
+	int R=1;
+	double t;
+	assert(!S->ctx.backend);
+	
+	S->ctx.tstore = &S->tstore;
+	S->ctx.ss = &g_ss;
+	S->tstore.ss = &g_ss;
+
+	// Backend init
+	TRY( mlis_backend_init(S) );
+
+	// Model parameters header load
+	TRY( mlis_model_load(S) );
+
+	// Identify model type
+	TRY( mlis_model_ident(S) );
+	
+	// Load loras
+	if (vec_count(S->loras)) {
+		t = timing_time();
+		vec_for(S->loras,i,0) {
+			TRY( mlis_lora_load_apply(S, S->loras[i].path, S->loras[i].mult) );
+		}
+		t = timing_time() - t;
+		log_info("LoRA's applied: %u {%.3fs}", vec_count(S->loras), t);
+	}
 	
 end:
 	return R;
@@ -655,36 +725,30 @@ end:
 int mlis_img_encode(MLImgSynthApp* S, const LocalTensor* img, LocalTensor* latent)
 {
 	int R=1;
-	TensorStore *ts = S->ctx.tstore;
 	if (S->c.use_tae) {
-		ts = &S->tstore_tae;
-		SWAPg(S->ctx.tstore, ts);
-		S->ctx.tprefix = NULL;
+		S->ctx.tprefix = "tae";
 		TRY( sdtae_encode(&S->ctx, S->tae_p, img, latent) );
 	} else {
 		S->ctx.tprefix = "vae";
 		TRY( sdvae_encode(&S->ctx, S->vae_p, img, latent, S->c.vae_tile) );
 	}
+	TRY_LOG( ltensor_finite_check(img), "NaN found in encoded latent");
 end:
-	SWAPg(S->ctx.tstore, ts);
 	return R;
 }
 
 int mlis_img_decode(MLImgSynthApp* S, const LocalTensor* latent, LocalTensor* img)
 {
 	int R=1;
-	TensorStore *ts = S->ctx.tstore;
 	if (S->c.use_tae) {
-		TensorStore *ts = &S->tstore_tae;
-		SWAPg(S->ctx.tstore, ts);
-		S->ctx.tprefix = NULL;
+		S->ctx.tprefix = "tae";
 		TRY( sdtae_decode(&S->ctx, S->tae_p, latent, img) );
 	} else {
 		S->ctx.tprefix = "vae";
 		TRY( sdvae_decode(&S->ctx, S->vae_p, latent, img, S->c.vae_tile) );
 	}
+	TRY_LOG( ltensor_finite_check(img), "NaN found in decoded image");
 end:
-	SWAPg(S->ctx.tstore, ts);
 	return R;
 }
 
@@ -815,7 +879,7 @@ int mlis_clip_cmd(MLImgSynthApp* S)
 	
 	TRY( mlis_ml_init(S) );
 
-	bool has_tproj = tstore_tensor_get(&S->tstore, "clip.text.text_projection");
+	bool has_tproj = tstore_tensor_get(&S->tstore, "clip.text.text_proj");
 
 	TRY( mlis_clip_encode(S, S->c.prompt, &embed,
 		has_tproj ? &feat : NULL, S->clip_p, "clip", true) );
@@ -969,6 +1033,10 @@ int mlis_gen_img_save(MLImgSynthApp* S, Image* img, int nfe)
 		dstr_printfa(infotxt, ", SNoise: %g", S->sampler.c.s_noise);
 	if (S->c.use_cfg)
 		dstr_printfa(infotxt, ", CFG scale: %g", S->c.cfg_scale);
+	if (S->c.path_in) {
+		dstr_printfa(infotxt, ", Mode: %s, t_ini: %g",
+			S->sampler.c.lmask ? "inpaint" : "img2img", S->sampler.c.f_t_ini);
+	}
 	dstr_printfa(infotxt, ", Steps: %u", S->sampler.n_step);
 	dstr_printfa(infotxt, ", NFE: %u", nfe);
 	dstr_printfa(infotxt, ", Size: %ux%u", img->w, img->h);
@@ -997,26 +1065,39 @@ end:
 int mlis_generate(MLImgSynthApp* S)
 {
 	int R=1;
+	const char *path;
 	UnetState ctx={0};
 	Image img={0};
-	LocalTensor latent={0}, noise={0}, 
+	LocalTensor latent={0}, lmask={0}, tmpt={0},
 	            cond={0}, label={0},
 				uncond={0}, unlabel={0};
 	
+	double tm = timing_time();
+
 	unet_params_init();  //global
 	
 	TRY( mlis_ml_init(S) );
+	int vae_f = S->vae_p->f_down;
 
 	// Latent load
-	if (S->c.path_in) {
-		const char *ext = path_ext(S->c.path_in);
+	if ((path = S->c.path_in)) {
+		const char *ext = path_ext(path);
 		if (!strcmp(ext, "tensor")) {  //latent
-			TRY( ltensor_load_path(&latent, S->c.path_in) );
+			TRY( ltensor_load_path(&latent, path) );
 		}
 		else {  //image
-			log_debug("Loading image from '%s'", S->c.path_in);
-			img_load_file(&img, S->c.path_in);
-			ltensor_from_image(&latent, &img);
+			log_debug("Loading image from '%s'", path);
+			img_load_file(&img, path);
+
+			if (img.format == IMG_FORMAT_RGBA) {
+				log_info("In-painting from alpha channel");
+				ltensor_from_image_alpha(&latent, &lmask, &img);
+				ltensor_downsize(&lmask, vae_f, vae_f, 1, 1);
+			} else if (img.format == IMG_FORMAT_RGB)
+				ltensor_from_image(&latent, &img);
+			else
+				ERROR_LOG(-1, "invalid image format: should be RGB or RGBA");
+
 			TRY( mlis_img_encode(S, &latent, &latent) );
 		}
 		
@@ -1029,8 +1110,8 @@ int mlis_generate(MLImgSynthApp* S)
 		
 		log_debug3_ltensor(&latent, "input latent");
 
-		S->c.width  = latent.s[0] * S->vae_p->f_down;
-		S->c.height = latent.s[1] * S->vae_p->f_down;
+		S->c.width  = latent.s[0] * vae_f;
+		S->c.height = latent.s[1] * vae_f;
 	}
 	else {
 		log_debug("Empty initial latent");
@@ -1042,9 +1123,31 @@ int mlis_generate(MLImgSynthApp* S)
 	}
 	log_info("Output size: %ux%u", S->c.width, S->c.height);
 
+	// Mask for inpainting
+	if ((path = S->c.path_inmask)) {
+		const char *ext = path_ext(path);
+		if (!strcmp(ext, "tensor")) {  //latent
+			TRY( ltensor_load_path(&lmask, path) );
+		}
+		else {  //image
+			log_debug("Loading mask from '%s'", path);
+			img_load_file(&img, path);
+			if (img.format == IMG_FORMAT_GRAY)
+				ltensor_from_image(&lmask, &img);
+			else
+				ERROR_LOG(-1, "invalid mask format: should be grayscale");
+
+			ltensor_downsize(&lmask, vae_f, vae_f, 1, 1);
+		}
+		TRY( ltensor_shape_check_log(&lmask, "input latent mask",
+			latent.s[0], latent.s[1], 1, 1) );
+		
+		log_info("In-painting from mask");
+	}
+
 	// Conditioning load
-	if (S->c.path_in2){
-		TRY( ltensor_load_path(&cond, S->c.path_in2) );
+	if ((path = S->c.path_in2)) {
+		TRY( ltensor_load_path(&cond, path) );
 		TRY( ltensor_shape_check_log(&cond, "input conditioning",
 			S->unet_p->n_ctx, 0, 1, 1) );
 	}
@@ -1072,24 +1175,26 @@ int mlis_generate(MLImgSynthApp* S)
 	// Sampling initialization
 	S->sampler.unet_p = S->unet_p;
 	S->sampler.nfe_per_dxdt = S->c.use_cfg ? 2 : 1;
+	S->sampler.c.lmask = ltensor_good(&lmask) ? &lmask : NULL;
 
-	struct dxdt_args A = { .app=S, .ctx=&ctx, .tmpt=&noise,
+	struct dxdt_args A = { .app=S, .ctx=&ctx, .tmpt=&tmpt,
 		.cond=&cond, .uncond=&uncond, .label=&label, .unlabel=&unlabel };
 	S->sampler.solver.dxdt = mlis_denoise_dxdt;
 	S->sampler.solver.user = &A;
 	
 	TRY( dnsamp_init(&S->sampler) );
-
-	// Add noise to initial latent
-	ltensor_resize_like(&noise, &latent);
-	rng_randn(ltensor_nelements(&noise), noise.d);
-	ltensor_for(latent,i,0) latent.d[i] += noise.d[i] * S->sampler.sigmas[0];
-	log_debug3_ltensor(&latent, "latent+noise");
 	
 	// Prepare computation
 	S->ctx.tprefix = "unet";
 	TRY( unet_denoise_init(&ctx, &S->ctx, S->unet_p, latent.s[0], latent.s[1],
 		S->c.unet_split) );
+	
+	log_info("Generating "
+		"(solver: %s, sched: %s, ancestral: %g, snoise: %g, cfg-s: %g, steps: %d"
+		", nfe/s: %d)",
+		id_str(S->sampler.c.method), id_str(S->sampler.c.sched),
+		S->sampler.c.s_ancestral, S->sampler.c.s_noise, S->c.cfg_scale,
+		S->sampler.n_step, S->sampler.nfe_per_step);
 
 	// Denoising / generation / sampling
 	TRY( dnsamp_sample(&S->sampler, &latent) );
@@ -1107,11 +1212,17 @@ int mlis_generate(MLImgSynthApp* S)
 	// Save
 	TRY( mlis_gen_img_save(S, &img, ctx.nfe) );
 
+	tm = timing_time() - tm;
+	log_info("Generation done {%.3fs}", tm);
+
 end:
 	img_free(&img);
-	ltensor_free(&noise);
+	ltensor_free(&tmpt);
+	ltensor_free(&unlabel);
+	ltensor_free(&label);
 	ltensor_free(&uncond);
 	ltensor_free(&cond);
+	ltensor_free(&lmask);
 	ltensor_free(&latent);
 	mlctx_free(&S->ctx);
 	return R;
@@ -1135,7 +1246,7 @@ int mlis_check(MLImgSynthApp* S)
 	const char *prompt = "a photograph of an astronaut riding a horse";
 
 	{
-		bool has_tproj = tstore_tensor_get(&S->tstore, "clip.text.text_projection");
+		bool has_tproj = tstore_tensor_get(&S->tstore, "clip.text.text_proj");
 		TRY( mlis_clip_encode(S, prompt, &lt,
 			has_tproj ? &lt2 : NULL, S->clip_p, "clip", true) );
 		
@@ -1154,7 +1265,7 @@ int mlis_check(MLImgSynthApp* S)
 
 	if (S->clip2_p)
 	{
-		bool has_tproj = tstore_tensor_get(&S->tstore, "clip2.text.text_projection");
+		bool has_tproj = tstore_tensor_get(&S->tstore, "clip2.text.text_proj");
 		TRY( mlis_clip_encode(S, prompt, &lt,
 			has_tproj ? &lt2 : NULL, S->clip2_p, "clip2", true) );
 
