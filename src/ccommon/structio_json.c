@@ -747,7 +747,7 @@ int stio_json_read_chunk(StioStream* sio, StioCtx* ctx, Any* value)
 			TRYR( stream_space_skip_(sio->s) );
 			TRYR( c = stream_char_get(sio->s) );
 			if (c == ']') end=true;
-			else if (stream_unget(sio->s, 1) != 1) return STIO_E_READ;
+			else stream_unget(sio->s, 1);
 		}
 	}
 	else return STIO_E_CONTEXT;

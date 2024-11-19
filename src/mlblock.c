@@ -146,8 +146,8 @@ int mlctx_build(MLCtx* C, MLTensor* result)
 	}
 
     ggml_build_forward_expand(C->graph, result);
-	mllog_debug("graph size:%d n_nodes:%d n_leafs:%d",
-		C->graph->size, C->graph->n_nodes, C->graph->n_leafs);
+	mllog_debug("graph size:%d n_nodes:%d",
+		ggml_graph_size(C->graph), ggml_graph_n_nodes(C->graph));
 
 //end:
 	return R;

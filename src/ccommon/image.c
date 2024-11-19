@@ -56,8 +56,8 @@ ImgColor img_color_hsv2rgb(const ImgColorHSV hsv)
 
 ImgColorHSV img_color_rgb2hsv(const ImgColor rgb)
 {
-	const int rgb_min = MIN3(rgb.r, rgb.g, rgb.b);
-	const int rgb_max = MAX3(rgb.r, rgb.g, rgb.b);
+	const int rgb_min = ccMIN3(rgb.r, rgb.g, rgb.b);
+	const int rgb_max = ccMAX3(rgb.r, rgb.g, rgb.b);
 	const int chroma  = rgb_max - rgb_min;
 
 	int a = rgb.a << HSV_ABITS;
@@ -152,8 +152,8 @@ void img_view_make(Image* dst, const Image* src, ImgRect rect)
 	if (rect.x < 0) { rect.w += rect.x; rect.x = 0; }
 	if (rect.y < 0) { rect.h += rect.y; rect.y = 0; }
 
-	rect.w = MAXg(MINg(rect.x + rect.w, (int)src->w) - rect.x, 0);
-	rect.h = MAXg(MINg(rect.y + rect.h, (int)src->h) - rect.y, 0);
+	rect.w = ccMAX(ccMIN(rect.x + rect.w, (int)src->w) - rect.x, 0);
+	rect.h = ccMAX(ccMIN(rect.y + rect.h, (int)src->h) - rect.y, 0);
 
 	if (rect.w < 0) rect.w = 0;
 	if (rect.h < 0) rect.h = 0;
@@ -169,36 +169,29 @@ void img_view_make(Image* dst, const Image* src, ImgRect rect)
 //TODO: macro the switch(img->format) and color set code?
 void img_fill(Image* img, const ImgColor color)
 {
-	unsigned x, y;
+	unsigned w=img->w, h=img->h, x, y;
+	ImgColorInt c = img_color_map(color, img->format);
+	
 	switch (img->format) {
 	case IMG_FORMAT_GRAY: {
-		unsigned char v = MAX3(color.r, color.g, color.b) * color.a / 255;
-		for (y=0; y<img->h; ++y) {
-			unsigned char* drow = img->data + img->pitch * y;
-			for (x=0; x<img->w; ++x, drow+=img->bypp) {
-				*drow = v;
-			}
+		for (y=0; y<h; ++y) {
+			uint8_t *p = &IMG_INDEX(*img, 0, y);
+			for (x=0; x<w; ++x, ++p)
+				*p = c & 0xff;
 		}
 		} break;
 	case IMG_FORMAT_RGB:
 		for (y=0; y<img->h; ++y) {
-			unsigned char* drow = img->data + img->pitch * y;
-			for (x=0; x<img->w; ++x, drow+=img->bypp) {
-				*(drow)   = color.r;  //TODO: endianness
-				*(drow+1) = color.g;
-				*(drow+2) = color.b;
-			}
+			uint8_t *p = &IMG_INDEX(*img, 0, y);
+			for (x=0; x<img->w; ++x, p+=3)
+				memcpy(p, &c, 3);
 		}
 		break;
 	case IMG_FORMAT_RGBA:
 		for (y=0; y<img->h; ++y) {
-			unsigned char* drow = img->data + img->pitch * y;
-			for (x=0; x<img->w; ++x, drow+=img->bypp) {
-				*(drow)   = color.r;  //TODO: endianness
-				*(drow+1) = color.g;
-				*(drow+2) = color.b;
-				*(drow+3) = color.a;
-			}
+			uint8_t *p = &IMG_INDEX(*img, 0, y);
+			for (x=0; x<img->w; ++x, p+=4)
+				memcpy(p, &c, 4);
 		}
 		break;
 	default:

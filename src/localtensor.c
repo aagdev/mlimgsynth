@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "localtensor.h"
+#include "ccommon/ccommon.h"
 #include "ccommon/stream.h"
 #include "ccommon/logging.h"
 #include "ccommon/image_io.h"
@@ -294,7 +295,7 @@ int ltensor_img_redblue(const LocalTensor* S, Image* img)
 			LT_SHAPE_UNPACK(*S));
 
 	float mn, mx = ltensor_minmax(S, &mn);
-	float scale = MAXg(mx, -mn);
+	float scale = ccMAX(mx, -mn);
 
 	unsigned w=S->s[0], h=S->s[1];
 	img_resize(img, w,h, IMG_FORMAT_RGB, 0);

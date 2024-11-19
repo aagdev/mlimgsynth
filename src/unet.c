@@ -3,6 +3,7 @@
  */
 #include "unet.h"
 #include "mlblock_nn.h"
+#include "ccommon/ccommon.h"
 #include "ccommon/bisect.h"
 #include "ccommon/timing.h"
 #include <math.h>
@@ -313,7 +314,7 @@ float linear_interp(unsigned n, float* vec, float t)
 float linear_est(unsigned n, float* vec, float v)
 {
 	assert( vec[0] < vec[n-1] );  //must be sorted ascending
-	BISECT_RIGHT_DECL(found, idx, 0, n, SIGNg(vec[i_] - v) );
+	BISECT_RIGHT_DECL(found, idx, 0, n, copysign(1, vec[i_] - v) );
 	if (idx+1 >= n) return n-1;
 	float v1 = vec[idx], v2 = vec[idx+1];
 	return idx + (v - v1) / (v2 - v1);

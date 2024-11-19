@@ -56,7 +56,7 @@ set IDX=0
 :loop
 set /a IDX=IDX+1
 echo Generating %IDX% / %NBATCH%
-mlimgsynth generate -b "%BACKEND%" -m "%MODEL%" --lora-dir "%LORADIR%" -p "%PROMPT%" -n "%NPROMPT%" -o "%OUTNAME%-%%I.%OUTEXT%" -W "%WIDTH%" -H "%HEIGHT%" --cfg-scale "%CFG_SCALE%" --steps "%STEPS%" --seed "%SEED%" --method "%METHOD%" --sched "%SCHED%" %SAMPOPT% %EXTRA%
+mlimgsynth generate -b "%BACKEND%" -m "%MODEL%" --lora-dir "%LORADIR%" -p "%PROMPT%" -n "%NPROMPT%" -o "%OUTNAME%-%IDX%.%OUTEXT%" -W "%WIDTH%" -H "%HEIGHT%" --cfg-scale "%CFG_SCALE%" --steps "%STEPS%" --seed "%SEED%" --method "%METHOD%" --sched "%SCHED%" %SAMPOPT% %EXTRA%
 if errorlevel 1 goto error
 if not "%SEED%"=="" set /a SEED=SEED+1
 if not "%IDX%"=="%NBATCH%" goto loop

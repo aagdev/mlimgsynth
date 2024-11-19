@@ -136,7 +136,7 @@ int safet_read_tensor(StioStream *sio, TSTensorEntry* entry, const char* name)
 
 	// Reverse shape and fill with ones
 	for (unsigned i=0; i<e.shape_n/2; ++i)
-		SWAPTg(unsigned, e.shape[i], e.shape[e.shape_n-1-i]);
+		ccSWAPT(unsigned, e.shape[i], e.shape[e.shape_n-1-i]);
 	for (unsigned i=e.shape_n; i<COUNTOF(e.shape); ++i)
 		e.shape[i] = 1;
 

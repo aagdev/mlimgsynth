@@ -22,7 +22,7 @@ GGML_LIB_PATH := ggml/Release/src
 endif
 cppflags += -I$(GGML_INCLUDE_PATH)
 cflags += -Wno-pedantic
-ldlibs += -lggml
+ldlibs += -lggml -lggml-base
 ldflags += -L$(GGML_LIB_PATH) -Wl,-rpath,$(GGML_LIB_PATH)
 
 ## ggml scheduler is need for incomplete backends (no longer needed for vulkan)

@@ -31,23 +31,19 @@
 #define IFFALSESET(VAR,DEF)		((VAR) ? (VAR) : ((VAR) = (DEF)))
 #define IFNPOSSET(VAR,DEF)		((VAR) > 0 ? (VAR) : ((VAR) = (DEF)))
 
-#define SIGNg(X)		((X) < 0 ? -1 : (X) > 0 ? 1 : 0)
-#define ABSg(X)			((X)<0 ? -(X) : (X))
-#define ccMIN(X,Y)		((X)<(Y) ? (X) : (Y))
-#define ccMAX(X,Y)		((X)>(Y) ? (X) : (Y))
-#define MINg ccMIN  //deprecated
-#define MAXg ccMAX  //deprecated
-#define MIN3(A,B,C)		MINg(MINg(A,B),C)
-#define MAX3(A,B,C)		MAXg(MAXg(A,B),C)
-#define LIMITg(V,L,H)	((V) < (L) ? (V) = (L) : (V) > (H) ? (V) = (H) : (V))
-#define TRUNCATEg		LIMITg
+#define ccSIGN(X)			((X) < 0 ? -1 : (X) > 0 ? 1 : 0)
+#define ccABS(X)			((X)<0 ? -(X) : (X))
+#define ccMIN(X,Y)			((X)<(Y) ? (X) : (Y))
+#define ccMAX(X,Y)			((X)>(Y) ? (X) : (Y))
+#define ccMIN3(A,B,C)		ccMIN(ccMIN(A,B),C)
+#define ccMAX3(A,B,C)		ccMAX(ccMAX(A,B),C)
 #define ccCLAMPED(V,L,H)	((V)<(L) ? (L) : (V)>(H) ? (H) : (V))
 #define ccCLAMP(V,L,H)		((V)<(L) ? ((V)=(L)) : (V)>(H) ? ((V)=(H)) : (V))
 
-#define SWAPVg(V,A,B)  ((V)=(A), (A)=(B), (B)=(V))
-#define SWAPTg(T,A,B)  do { T tmp_=(A); (A)=(B); (B)=tmp_; } while(0)
+#define ccSWAPV(V,A,B)		((V)=(A), (A)=(B), (B)=(V))
+#define ccSWAPT(T,A,B)		do { T tmp_=(A); (A)=(B); (B)=tmp_; } while(0)
 
-#define SWAPg(A,B)  do { \
+#define ccSWAP(A,B)  do { \
 	char tmp_[sizeof(A)]; \
 	void *a=&(A), *b=&(B); \
 	memcpy(tmp_, a, sizeof(A)); \

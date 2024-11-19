@@ -70,6 +70,7 @@ APP_NAME_VERSION "\n"
 "  -p TEXT              Prompt for text conditioning.\n"
 "  -n TEXT              Negative prompt for text unconditioning.\n"
 "  -b NAME              Backend for computation.\n"
+"  -B TEXT              Backend-specific parameters.\n"
 "  -t INT               Number of threads to use in the CPU backend.\n"
 "  -m PATH              Model file.\n"
 "  -i PATH              Input image or latent.\n"
@@ -135,8 +136,10 @@ typedef struct {
 	} *loras;  //vector
 
 	struct {
-		const char *path_model, *path_in, *path_in2, *path_out, *path_tae,
-			*path_inmask, *path_lora_dir, *backend, *prompt, *nprompt;
+		const char *backend, *beparams,
+			*path_model, *path_in, *path_in2, *path_out, *path_tae,
+			*path_inmask, *path_lora_dir,
+			*prompt, *nprompt;
 		int cmd, n_thread, width, height, seed, clip_skip, vae_tile;
 		float cfg_scale;
 		unsigned dump_info:1, use_tae:1, use_cfg:1, unet_split:1;
@@ -343,6 +346,7 @@ int mlis_args_load(MLImgSynthApp* S, int argc, char* argv[])
 				case 'p':  S->c.prompt = next; i++; break;
 				case 'n':  S->c.nprompt = next; i++; break;
 				case 'b':  S->c.backend = next; i++; break;
+				case 'B':  S->c.beparams = next; i++; break;
 				case 't':  S->c.n_thread = atoi(next); i++; break;
 				case 's':  S->sampler.c.n_step = atoi(next); i++; break;
 				case 'W':  S->c.width = atoi(next); i++; break;
@@ -566,32 +570,40 @@ end:
 	return R;
 }
 
+static
+void ggml__backend_set_n_threads(ggml_backend_t backend, int n_threads)
+{
+	ggml_backend_dev_t dev = ggml_backend_get_device(backend);
+	ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
+	ggml_backend_set_n_threads_t func = ggml_backend_reg_get_proc_address(reg,
+		"ggml_backend_set_n_threads");
+	if (func)
+		func(backend, n_threads);
+}
+
 int mlis_backend_init(MLImgSynthApp* S)
 {
 	int R=1;
 
 	if (S->c.backend && S->c.backend[0])
-		S->ctx.backend = ggml_backend_reg_init_backend_from_str(S->c.backend);	
+		S->ctx.backend = ggml_backend_init_by_name(S->c.backend, S->c.beparams);
 	else 
-		S->ctx.backend = ggml_backend_cpu_init();
+		S->ctx.backend = ggml_backend_init_best();
 	
 	if (!S->ctx.backend) ERROR_LOG(-1, "ggml backend init");
 	log_info("Backend: %s", ggml_backend_name(S->ctx.backend));
 
-	if (ggml_backend_is_cpu(S->ctx.backend))
-	{
-		if (S->c.n_thread)
-			ggml_backend_cpu_set_n_threads(S->ctx.backend, S->c.n_thread);
-	}
-#if USE_GGML_SCHED
-	else
+	if (S->c.n_thread)
+		ggml__backend_set_n_threads(S->ctx.backend, S->c.n_thread);
+
+#if USE_GGML_SCHED  //old code
 	{
 		log_debug("Fallback backend CPU");
 		S->ctx.backend2 = ggml_backend_cpu_init();
 		if (!S->ctx.backend2) ERROR_LOG(-1, "ggml fallback backend CPU init");
 		
 		if (S->c.n_thread)
-			ggml_backend_cpu_set_n_threads(S->ctx.backend2, S->c.n_thread);
+			ggml_backend_set_n_threads_t(S->ctx.backend2, S->c.n_thread);
 	}
 #endif
 
@@ -1087,7 +1099,8 @@ int mlis_generate(MLImgSynthApp* S)
 		}
 		else {  //image
 			log_debug("Loading image from '%s'", path);
-			img_load_file(&img, path);
+			TRY_LOG( img_load_file(&img, path),
+				"Could not load image '%s'", path);
 
 			if (img.format == IMG_FORMAT_RGBA) {
 				log_info("In-painting from alpha channel");
@@ -1131,7 +1144,8 @@ int mlis_generate(MLImgSynthApp* S)
 		}
 		else {  //image
 			log_debug("Loading mask from '%s'", path);
-			img_load_file(&img, path);
+			TRY_LOG( img_load_file(&img, path),
+				"Could not load image '%s'", path);
 			if (img.format == IMG_FORMAT_GRAY)
 				ltensor_from_image(&lmask, &img);
 			else
@@ -1353,6 +1367,32 @@ end:
 	return R;
 }
 
+int mlis_backends_print()
+{
+	Stream out={0};
+
+	TRYR( stream_open_std(&out, STREAM_STD_OUT, 0) );
+
+	// List backends
+	size_t nb = ggml_backend_reg_count();
+	for (size_t ib=0; ib<nb; ++ib) {
+		ggml_backend_reg_t br = ggml_backend_reg_get(ib);
+		stream_printf(&out, "%s\n", ggml_backend_reg_name(br));
+		
+		// List devices
+		size_t nd = ggml_backend_reg_dev_count(br);
+		for (size_t id=0; id<nd; ++id) {
+			ggml_backend_dev_t bd = ggml_backend_reg_dev_get(br, id);
+			stream_printf(&out, "\t%s %s\n",
+				ggml_backend_dev_name(bd),
+				ggml_backend_dev_description(bd) );
+		}
+	}
+
+	stream_close(&out, 0);
+	return 1;
+}
+
 int main(int argc, char* argv[])
 {
 	int R=0, r;
@@ -1376,9 +1416,7 @@ int main(int argc, char* argv[])
 
 	if (!app.c.cmd) ;
 	else if (app.c.cmd == ID_list_backends) {
-		size_t n = ggml_backend_reg_get_count();
-		for (size_t i=0; i<n; ++i)
-			printf("%s\n", ggml_backend_reg_get_name(i));
+		mlis_backends_print();
 	}
 	else if (app.c.cmd == ID_check) {
 		TRY( mlis_check(&app) );

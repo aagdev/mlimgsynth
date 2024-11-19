@@ -71,7 +71,7 @@ typedef enum ImgFormat {
 	IMG_FORMAT_RGBA		= 3 | IMG_FORMAT_F_COLOR | IMG_FORMAT_F_ALPHA,
 } ImgFormat;
 
-typedef unsigned long ImgColorInt;
+typedef uint32_t ImgColorInt;
 
 static inline
 ImgColorInt img_color_map(const ImgColor c, ImgFormat fmt);
@@ -112,12 +112,12 @@ typedef enum ImgFlags {
 } ImgFlags;
 
 typedef struct Image {
-	unsigned char *	data;
-	unsigned		w, h;
-	unsigned		pitch;	//bytes per line
-	unsigned		bypp;	//bytes per pixel
-	ImgFormat		format;
-	int				flags;
+	uint8_t 	*data;
+	unsigned	w, h;
+	unsigned	pitch;	//bytes per line
+	unsigned	bypp;	//bytes per pixel
+	ImgFormat	format;
+	int			flags;
 } Image;
 
 void img_free(Image* img);
@@ -149,24 +149,43 @@ ImgColor img_pixel_get(const Image* img, unsigned x, unsigned y);
 	((I).data[ (I).pitch * (Y) + (I).bypp * (X) + (C)])
 
 /*
-	Inline implementation
+	Inline implementations
 */
+
 static inline
 ImgColorInt img_color_map(const ImgColor c, ImgFormat fmt)
 {
-	unsigned long n=0;
-	unsigned char * p = (unsigned char *)&n;
+	ImgColorInt n=0;
+	uint8_t* p = (uint8_t*) &n;
 	switch (fmt) {
 	case IMG_FORMAT_GRAY:
 		p[0] = c.r;
 		if (p[0] < c.g) p[0] = c.g;
 		if (p[0] < c.b) p[0] = c.b;
 		break;
-	case IMG_FORMAT_RGB:	p[0]=c.r; p[1]=c.g; p[2]=c.b; break;
-	case IMG_FORMAT_RGBA:	p[0]=c.r; p[1]=c.g; p[2]=c.b; p[3]=c.a; break;
-	default:  break;
+	case IMG_FORMAT_RGB:
+		//TODO: endianness
+		p[0]=c.r; p[1]=c.g; p[2]=c.b;
+		break;
+	case IMG_FORMAT_RGBA:
+		//TODO: endianness
+		p[0]=c.r; p[1]=c.g; p[2]=c.b; p[3]=c.a;
+		break;
+	default:
+		break;
 	}
 	return n;
+}
+
+static inline
+ImgColor img_color_unmap(const uint8_t* p, ImgFormat fmt)
+{
+	switch (fmt) {
+	case IMG_FORMAT_GRAY:	return (ImgColor){ *p, *p, *p, 255 };
+	case IMG_FORMAT_RGB:	return (ImgColor){ p[0], p[1], p[2], 255 };
+	case IMG_FORMAT_RGBA:	return (ImgColor){ p[0], p[1], p[2], p[3] };
+	default:				return (ImgColor){0};
+	}
 }
 
 static inline
@@ -202,13 +221,18 @@ void img_zero(Image* img)
 }
 
 static inline
-ImgColor img_pixel_get(const Image* img, unsigned x, unsigned y) {
-	unsigned char * p = img->data + img->pitch * y + img->bypp * x;
-	switch (img->format) {
-	case IMG_FORMAT_GRAY:	return (ImgColor){ *p, *p, *p, 255 };
-	case IMG_FORMAT_RGB:	return (ImgColor){ p[0], p[1], p[2], 255 };
-	case IMG_FORMAT_RGBA:	return (ImgColor){ p[0], p[1], p[2], p[3] };
-	default:				return (ImgColor){0};
-	}
+ImgColor img_pixel_get(const Image* img, unsigned x, unsigned y)
+{
+	const uint8_t *p = &IMG_INDEX(*img, x, y);
+	return img_color_unmap(p, img->format);
+}
+
+static inline
+void img_pixel_set(const Image* img, unsigned x, unsigned y,
+	const ImgColor col)
+{
+	ImgColorInt c = img_color_map(col, img->format);
+	uint8_t *p = &IMG_INDEX(*img, x, y);
+	memcpy(p, &c, img->bypp);
 }
 

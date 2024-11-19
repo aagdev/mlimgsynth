@@ -299,7 +299,7 @@ int stream_read_prep(Stream* S, size_t nbytes)
 	}
 
 	if (nbytes && !(S->cursor+nbytes <= S->cursor_end))
-		return STREAM_E_READ;
+		return S->flags & SF_END ? STREAM_E_EOF : STREAM_E_READ;
 
 	assert(S->cursor_end >= S->cursor);
 	size_t sz = S->cursor_end - S->cursor;
@@ -382,7 +382,6 @@ int stream_seek_i(Stream* S, int64_t offset, int origin)
 			r = S->cls->seek(S->internal, offset, SEEK_SET);
 			if (r < 0 && r != STREAM_E_TELL) return r;
 			S->pos = offset;
-			S->cursor = S->cursor_end = S->buffer;
 			break;
 
 		case SEEK_CUR:
@@ -391,7 +390,6 @@ int stream_seek_i(Stream* S, int64_t offset, int origin)
 			r = S->cls->seek(S->internal, offset, SEEK_CUR);
 			if (r < 0 && r != STREAM_E_TELL) return r;
 			S->pos += offset;
-			S->cursor = S->cursor_end = S->buffer;
 			break;
 
 		case SEEK_END:
@@ -399,15 +397,16 @@ int stream_seek_i(Stream* S, int64_t offset, int origin)
 			r = S->cls->seek(S->internal, offset, SEEK_END);
 			if (r < 0) return r;
 			S->pos = r;
-			S->cursor = S->cursor_end = S->buffer;
 			break;
 
 		default:
-			assert(0);
+			return STREAM_E_SEEK;
 		}
 
 		assert(r == STREAM_E_TELL || r == S->pos);
 		
+		S->cursor = S->cursor_end = S->buffer;
+
 		if (S->flags & SF_MODE_WRITE)
 			S->cursor_end = S->buffer_end;
 	}
@@ -424,6 +423,8 @@ int stream_seek_i(Stream* S, int64_t offset, int origin)
 		case SEEK_END:
 			cur = S->cursor_end + offset;
 			break;
+		default:
+			return STREAM_E_SEEK;
 		}
 
 		if (cur < S->buffer) return STREAM_E_SEEK;
@@ -443,7 +444,7 @@ long stream_read_i(Stream*restrict S, size_t nbyte, void*restrict buf)
 	uint8_t *bcur = buf;
 
 	if (S->cursor < S->cursor_end) {
-		size_t n = MINg(nbyte, S->cursor_end - S->cursor);
+		size_t n = ccMIN(nbyte, S->cursor_end - S->cursor);
 		memcpy(bcur, S->cursor, n);
 		S->cursor += n;
 		bcur += n;

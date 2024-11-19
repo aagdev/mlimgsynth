@@ -507,23 +507,27 @@ int stream_write_chk(Stream*restrict S, size_t nbytes, const void*restrict buffe
 static inline
 int stream_seek(Stream* S, int64_t offset, int origin)
 {
-	switch (origin) {
-	case SEEK_SET:
-		if (offset >= S->pos) {
-			uint8_t* cur = S->buffer + (offset - S->pos);
-			if (cur <= S->cursor_end) {
+	// Write stream must be flushed moving the cursor back,
+	// otherwise some of the written data can be lost.
+	if (!(S->flags & SF_MODE_WRITE)) {
+		switch (origin) {
+		case SEEK_SET:
+			if (offset >= S->pos) {
+				uint8_t* cur = S->buffer + (offset - S->pos);
+				if (cur <= S->cursor_end) {
+					S->cursor = cur;
+					return 0;
+				}
+			}
+			break;
+		case SEEK_CUR: {
+			uint8_t* cur = S->cursor + offset;
+			if (S->buffer <= cur && cur <= S->cursor_end) {
 				S->cursor = cur;
 				return 0;
 			}
+			} break;
 		}
-		break;
-	case SEEK_CUR: {
-		uint8_t* cur = S->cursor + offset;
-		if (S->buffer <= cur && cur <= S->cursor_end) {
-			S->cursor = cur;
-			return 0;
-		}
-		} break;
 	}
 	return stream_seek_i(S, offset, origin);
 }
