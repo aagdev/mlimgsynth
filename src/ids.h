@@ -66,6 +66,7 @@ const char * ids_str[ID__END] = {
 };
 
 void ids_init() {
+	if (strsto_count(&g_ss)) return;
 	for (unsigned i=0; i<ID__END; ++i)	
 		strsto_add2(&g_ss, strsl_fromz(ids_str[i]), i, true);
 }

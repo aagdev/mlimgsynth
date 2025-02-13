@@ -97,7 +97,7 @@ end:
 
 void dnsamp_mask_apply(DenoiseSampler* S, LocalTensor* x)
 {
-	int n0 = x->s[0], n1 = x->s[1], n2 = x->s[2],
+	int n0 = x->n[0], n1 = x->n[1], n2 = x->n[2],
 		s1 = n0, s2 = n0*n1;
 	assert( ltensor_shape_check(S->c.lmask, n0, n1, 1, 1) );
 	for (int i2=0; i2<n2; ++i2)

@@ -10,20 +10,26 @@
 #include "ggml.h"
 #include "ggml-backend.h"
 
-typedef struct {
-	float* d;  //data
-	int s[4];  //shape
+typedef struct LocalTensor {
+	float	*d;  //data
+	int		n[4];  //shape
+	int		flags;
 } LocalTensor;
 
+enum {
+	// Memory owned by the tensor
+	LT_F_OWNMEM = 1,
+};
+
 #define LT_SHAPE_FMT		"%dx%dx%dx%d"
-#define LT_SHAPE_UNPACK(X)	(X).s[0], (X).s[1], (X).s[2], (X).s[3]
+#define LT_SHAPE_UNPACK(X)	(X).n[0], (X).n[1], (X).n[2], (X).n[3]
 
 static inline
 size_t ltensor_good(const LocalTensor* S) { return S && S->d; }
 
 static inline
 size_t ltensor_nelements(const LocalTensor* S) {
-	return (size_t)S->s[0] * S->s[1] * S->s[2] * S->s[3];
+	return (size_t)S->n[0] * S->n[1] * S->n[2] * S->n[3];
 }
 
 static inline
@@ -33,14 +39,17 @@ size_t ltensor_nbytes(const LocalTensor* S) {
 
 static inline
 void ltensor_free(LocalTensor* S) {
-	alloc_free(g_allocator, S->d);
+	if (S->flags & LT_F_OWNMEM)
+		alloc_free(g_allocator, S->d);
 	*S = (LocalTensor){0};
 }
 
 static inline
 void ltensor_resize(LocalTensor* S, int n0, int n1, int n2, int n3) {
-	S->s[0] = n0;  S->s[1] = n1;  S->s[2] = n2;  S->s[3] = n3;
+	if (!(S->flags & LT_F_OWNMEM)) S->d = NULL;
+	S->n[0] = n0;  S->n[1] = n1;  S->n[2] = n2;  S->n[3] = n3;
 	S->d = alloc_realloc(g_allocator, S->d, ltensor_nbytes(S));
+	S->flags |= LT_F_OWNMEM;
 }
 
 static inline
@@ -74,7 +83,7 @@ void ltensor_copy_slice2(LocalTensor* dst, const LocalTensor* src,
 	int ds0, int ds1,
 	int ss0, int ss1 )
 {
-	ltensor_copy_slice(dst, src, n0,n1,src->s[2],src->s[3],
+	ltensor_copy_slice(dst, src, n0,n1,src->n[2],src->n[3],
 		di0,di1,0,0, si0,si1,0,0, ds0,ds1,1,1, ss0,ss1,1,1);
 }
 
@@ -93,16 +102,16 @@ void ltensor_from_backend(LocalTensor* S, struct ggml_tensor* out) {
 
 static inline
 bool ltensor_shape_equal(const LocalTensor* A, const LocalTensor* B) {
-	return (A->s[0] == B->s[0] && A->s[1] == B->s[1] && A->s[2] == B->s[2] &&
-		A->s[3] == B->s[3]);
+	return (A->n[0] == B->n[0] && A->n[1] == B->n[1] && A->n[2] == B->n[2] &&
+		A->n[3] == B->n[3]);
 }
 
 static inline
 int ltensor_shape_check(const LocalTensor* S, int n0, int n1, int n2, int n3) {
-	if (n0>0 && n0 != S->s[0]) return -1;
-	if (n1>0 && n1 != S->s[1]) return -1;
-	if (n2>0 && n2 != S->s[2]) return -1;
-	if (n3>0 && n3 != S->s[3]) return -1;
+	if (n0>0 && n0 != S->n[0]) return -1;
+	if (n1>0 && n1 != S->n[1]) return -1;
+	if (n2>0 && n2 != S->n[2]) return -1;
+	if (n3>0 && n3 != S->n[3]) return -1;
 	return 1;
 }
 
@@ -138,8 +147,10 @@ void log_ltensor_stats(int loglvl, const LocalTensor* S, const char* desc);
 #define log_debug3_ltensor(T, D) \
 	log_ltensor_stats(LOG_LVL_DEBUG3, (T), (D))
 
-// Reduces the sizes by the factors
-void ltensor_downsize(LocalTensor* S, int f0, int f1, int f2, int f3);
+// Reduces the sizes by the factors.
+// Can be done inplace (dst = src).
+void ltensor_downsize(LocalTensor* dst, const LocalTensor* src,
+	int f0, int f1, int f2, int f3);
 
 int ltensor_save_path(const LocalTensor* S, const char* path);
 int ltensor_load_path(LocalTensor* S, const char* path);

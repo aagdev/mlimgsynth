@@ -22,7 +22,11 @@ ldflags  = $(LDFLAGS)
 
 depflags = -MT $@ -MMD -MP -MF $(depdir)/$*.d
 
-# --
+### Compilation options
+ifndef nonative
+cppflags += -march=native
+endif
+
 ifdef debug
 objdir = obj_dbg
 depdir = .d_dbg
@@ -37,11 +41,11 @@ else ifdef small
 cppflags += -DNDEBUG
 flags += -Os
 else ifdef fast
-cppflags += -march=native -DNDEBUG
+cppflags += -DNDEBUG
 flags += -O3
 flags += -flto -fwhole-program -fuse-linker-plugin
 else
-cppflags += -march=native -DNDEBUG
+cppflags += -DNDEBUG
 flags += -O2
 endif
 
@@ -50,6 +54,7 @@ flags += -pg
 $(info gprof CMD gmon.out | less)
 endif
 
+###
 .PHONY: all clean
 
 # Disable implicit rules

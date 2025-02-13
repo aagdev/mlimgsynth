@@ -804,12 +804,12 @@ int mlis_vae_cmd(MLImgSynthApp* S, bool encode, bool decode)
 	}
 
 	// Sample latent distribution if needed
-	if (latent.s[2] == S->vae_p->d_embed*2)
+	if (latent.n[2] == S->vae_p->d_embed*2)
 	{
 		log_debug("latent sampling");
 		sdvae_latent_sample(&latent, &latent, S->vae_p);
 	}
-	else if (latent.s[2] != S->vae_p->d_embed)
+	else if (latent.n[2] != S->vae_p->d_embed)
 	{
 		ERROR_LOG(-1, "invalid latent shape: " LT_SHAPE_FMT,
 			LT_SHAPE_UNPACK(latent));
@@ -905,7 +905,7 @@ int mlis_clip_cmd(MLImgSynthApp* S)
 		
 		if (S->c.path_in2) {
 			ltensor_load_path(&feat2, S->c.path_in2);
-			TRY( ltensor_shape_check_log(&feat2, "feat2", feat.s[0], 1, 1, 1) );
+			TRY( ltensor_shape_check_log(&feat2, "feat2", feat.n[0], 1, 1, 1) );
 
 			//TODO: move similarity calculation to a function
 			unsigned n=ltensor_nelements(&feat2);
@@ -961,13 +961,13 @@ int mlis_sd_cond_get(MLImgSynthApp* S, const char* prompt,
 			S->clip2_p, "clip2", norm) );
 
 		// Concatenate both text embeddings
-		assert( cond->s[1] == tmpt.s[1] &&
-		        cond->s[2] == 1 && tmpt.s[2] == 1 &&
-			    cond->s[3] == 1 && tmpt.s[3] == 1 );	
+		assert( cond->n[1] == tmpt.n[1] &&
+		        cond->n[2] == 1 && tmpt.n[2] == 1 &&
+			    cond->n[3] == 1 && tmpt.n[3] == 1 );	
 
-		unsigned n_tok = tmpt.s[1],
-		         n_emb1 = cond->s[0],
-				 n_emb2 = tmpt.s[0],
+		unsigned n_tok = tmpt.n[1],
+		         n_emb1 = cond->n[0],
+				 n_emb2 = tmpt.n[0],
 		         n_emb = n_emb1 + n_emb2;
 
 		ltensor_resize(cond, n_emb, n_tok, 1, 1);
@@ -981,8 +981,8 @@ int mlis_sd_cond_get(MLImgSynthApp* S, const char* prompt,
 			S->clip2_p, "clip2", true) );
 
 		// Complete label embedding
-		assert( label->s[0]==n_emb2 &&
-			label->s[1]==1 && label->s[2]==1 && label->s[3]==1 );
+		assert( label->n[0]==n_emb2 &&
+			label->n[1]==1 && label->n[2]==1 && label->n[3]==1 );
 		ltensor_resize(label, S->unet_p->ch_adm_in, 1, 1, 1);
 		float *ld = label->d + n_emb2;
 		unsigned w = S->c.width, h = S->c.height;
@@ -992,7 +992,7 @@ int mlis_sd_cond_get(MLImgSynthApp* S, const char* prompt,
 		ld += sd_timestep_embedding(2, (float[]){0,0}, 256, 10000, ld);
 		// Target size
 		ld += sd_timestep_embedding(2, (float[]){h,w}, 256, 10000, ld);
-		assert(ld == label->d + label->s[0]);
+		assert(ld == label->d + label->n[0]);
 	}
 
 end:
@@ -1105,7 +1105,7 @@ int mlis_generate(MLImgSynthApp* S)
 			if (img.format == IMG_FORMAT_RGBA) {
 				log_info("In-painting from alpha channel");
 				ltensor_from_image_alpha(&latent, &lmask, &img);
-				ltensor_downsize(&lmask, vae_f, vae_f, 1, 1);
+				ltensor_downsize(&lmask, &lmask, vae_f, vae_f, 1, 1);
 			} else if (img.format == IMG_FORMAT_RGB)
 				ltensor_from_image(&latent, &img);
 			else
@@ -1115,7 +1115,7 @@ int mlis_generate(MLImgSynthApp* S)
 		}
 		
 		// Sample if needed
-		if (latent.s[2] == S->unet_p->n_ch_in*2)
+		if (latent.n[2] == S->unet_p->n_ch_in*2)
 			sdvae_latent_sample(&latent, &latent, S->vae_p);
 
 		TRY( ltensor_shape_check_log(&latent, "input latent",
@@ -1123,8 +1123,8 @@ int mlis_generate(MLImgSynthApp* S)
 		
 		log_debug3_ltensor(&latent, "input latent");
 
-		S->c.width  = latent.s[0] * vae_f;
-		S->c.height = latent.s[1] * vae_f;
+		S->c.width  = latent.n[0] * vae_f;
+		S->c.height = latent.n[1] * vae_f;
 	}
 	else {
 		log_debug("Empty initial latent");
@@ -1151,10 +1151,10 @@ int mlis_generate(MLImgSynthApp* S)
 			else
 				ERROR_LOG(-1, "invalid mask format: should be grayscale");
 
-			ltensor_downsize(&lmask, vae_f, vae_f, 1, 1);
+			ltensor_downsize(&lmask, &lmask, vae_f, vae_f, 1, 1);
 		}
 		TRY( ltensor_shape_check_log(&lmask, "input latent mask",
-			latent.s[0], latent.s[1], 1, 1) );
+			latent.n[0], latent.n[1], 1, 1) );
 		
 		log_info("In-painting from mask");
 	}
@@ -1200,7 +1200,7 @@ int mlis_generate(MLImgSynthApp* S)
 	
 	// Prepare computation
 	S->ctx.tprefix = "unet";
-	TRY( unet_denoise_init(&ctx, &S->ctx, S->unet_p, latent.s[0], latent.s[1],
+	TRY( unet_denoise_init(&ctx, &S->ctx, S->unet_p, latent.n[0], latent.n[1],
 		S->c.unet_split) );
 	
 	log_info("Generating "
@@ -1306,14 +1306,14 @@ int mlis_check(MLImgSynthApp* S)
 		float latent_sum = ltensor_sum(&lt2);
 		stream_printf(&out, "CHECK vae latent: %.6g\n", latent_sum);
 
-		if (lt2.s[2] == S->vae_p->ch_z*2) {
+		if (lt2.n[2] == S->vae_p->ch_z*2) {
 			sdvae_latent_mean(&lt2, &lt2, S->vae_p);
 			float latent_sum = ltensor_sum(&lt2);
 			stream_printf(&out, "CHECK vae latent mean: %.6g\n", latent_sum);
 		}
 
-		ltensor_shape_check_log(&lt2, "vae latent", lt.s[0]/S->vae_p->f_down,
-			lt.s[1]/S->vae_p->f_down, S->vae_p->ch_z, 1);
+		ltensor_shape_check_log(&lt2, "vae latent", lt.n[0]/S->vae_p->f_down,
+			lt.n[1]/S->vae_p->f_down, S->vae_p->ch_z, 1);
 	}
 
 	// Check latent to image decode
@@ -1325,8 +1325,8 @@ int mlis_check(MLImgSynthApp* S)
 		TRY( mlis_img_decode(S, &lt, &lt2) );
 		float image_sum = ltensor_sum(&lt2);
 		stream_printf(&out, "CHECK vae image: %.6g\n", image_sum);
-		ltensor_shape_check_log(&lt2, "vae image", lt.s[0]*S->vae_p->f_down,
-			lt.s[1]*S->vae_p->f_down, S->vae_p->ch_x, 1);
+		ltensor_shape_check_log(&lt2, "vae image", lt.n[0]*S->vae_p->f_down,
+			lt.n[1]*S->vae_p->f_down, S->vae_p->ch_x, 1);
 	}
 
 	// Check UNet denoise
@@ -1349,7 +1349,7 @@ int mlis_check(MLImgSynthApp* S)
 	
 		UnetState unet={0};
 		S->ctx.tprefix = "unet";
-		TRY( unet_denoise_init(&unet, &S->ctx, S->unet_p, lt.s[0], lt.s[1],
+		TRY( unet_denoise_init(&unet, &S->ctx, S->unet_p, lt.n[0], lt.n[1],
 			S->c.unet_split) );
 
 		TRY( unet_denoise_run(&unet, &lt, &lt2, &lt3, t, &lt4) );

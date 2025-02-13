@@ -20,24 +20,24 @@ void ltensor_copy_slice(LocalTensor* dst, const LocalTensor* src,
 	int ss0, int ss1, int ss2, int ss3 )
 {
 	// Bound checks  //TODO: complete
-	assert( si0 + ss0 * n0 <= src->s[0] );
-	assert( si1 + ss1 * n1 <= src->s[1] );
-	assert( si2 + ss2 * n2 <= src->s[2] );
-	assert( si3 + ss3 * n3 <= src->s[3] );
+	assert( si0 + ss0 * n0 <= src->n[0] );
+	assert( si1 + ss1 * n1 <= src->n[1] );
+	assert( si2 + ss2 * n2 <= src->n[2] );
+	assert( si3 + ss3 * n3 <= src->n[3] );
 
-	assert( di0 + ds0 * n0 <= dst->s[0] );
-	assert( di1 + ds1 * n1 <= dst->s[1] );
-	assert( di2 + ds2 * n2 <= dst->s[2] );
-	assert( di3 + ds3 * n3 <= dst->s[3] );
+	assert( di0 + ds0 * n0 <= dst->n[0] );
+	assert( di1 + ds1 * n1 <= dst->n[1] );
+	assert( di2 + ds2 * n2 <= dst->n[2] );
+	assert( di3 + ds3 * n3 <= dst->n[3] );
 	
 	// Strides for contiguous tensors
-	int ss1c = src->s[0];
-	int ss2c = src->s[0] * src->s[1]; 
-	int ss3c = src->s[0] * src->s[1] * src->s[2]; 
+	int ss1c = src->n[0];
+	int ss2c = src->n[0] * src->n[1]; 
+	int ss3c = src->n[0] * src->n[1] * src->n[2]; 
 
-	int ds1c = dst->s[0];
-	int ds2c = dst->s[0] * dst->s[1]; 
-	int ds3c = dst->s[0] * dst->s[1] * dst->s[2]; 
+	int ds1c = dst->n[0];
+	int ds2c = dst->n[0] * dst->n[1]; 
+	int ds3c = dst->n[0] * dst->n[1] * dst->n[2]; 
 	
 	// Initial positions in memory
 	const float *sp = src->d +si0 +si1*ss1c +si2*ss2c +si3*ss3c;
@@ -156,40 +156,38 @@ void log_ltensor_stats(int loglvl, const LocalTensor* S, const char* desc)
 		stat.asum, stat.hash, stat.first);
 }
 
-void ltensor_downsize(LocalTensor* S, int f0, int f1, int f2, int f3)
+void ltensor_downsize(LocalTensor* D, const LocalTensor* A,
+	int f0, int f1, int f2, int f3)
 {
 	assert( f0>0 && f1>0 && f2>0 && f3>0 );
 	
 	// Strides, initial
-	int ss1 = S->s[0];
-	int ss2 = S->s[0] * S->s[1]; 
-	int ss3 = S->s[0] * S->s[1] * S->s[2]; 
+	int ss1 = A->n[0];
+	int ss2 = A->n[0] * A->n[1]; 
+	int ss3 = A->n[0] * A->n[1] * A->n[2]; 
 
 	// New shape
-	S->s[0] /= f0;
-	S->s[1] /= f1;
-	S->s[2] /= f2;
-	S->s[3] /= f3;
+	ltensor_resize(D, A->n[0]/f0, A->n[1]/f1, A->n[2]/f2, A->n[3]/f3);
 	
 	// Strides, final
-	int ds1 = S->s[0];
-	int ds2 = S->s[0] * S->s[1]; 
-	int ds3 = S->s[0] * S->s[1] * S->s[2]; 
+	int ds1 = D->n[0];
+	int ds2 = D->n[0] * D->n[1]; 
+	int ds3 = D->n[0] * D->n[1] * D->n[2]; 
 
 	float fn = 1.0f/(f0*f1*f2*f3);
-	for (int i3=0; i3<S->s[3]; ++i3)
-	for (int i2=0; i2<S->s[2]; ++i2)
-	for (int i1=0; i1<S->s[1]; ++i1)
-	for (int i0=0; i0<S->s[0]; ++i0) {
+	for (int i3=0; i3<D->n[3]; ++i3)
+	for (int i2=0; i2<D->n[2]; ++i2)
+	for (int i1=0; i1<D->n[1]; ++i1)
+	for (int i0=0; i0<D->n[0]; ++i0) {
 		float v=0;
 		for (int j3=0; j3<f3; ++j3)
 		for (int j2=0; j2<f2; ++j2)
 		for (int j1=0; j1<f1; ++j1)
 		for (int j0=0; j0<f0; ++j0) {
-			v += S->d[i0*f0+j0 +(i1*f1+j1)*ss1 +(i2*f2+j2)*ss2 +(i3*f3+j3)*ss3];
+			v += A->d[i0*f0+j0 +(i1*f1+j1)*ss1 +(i2*f2+j2)*ss2 +(i3*f3+j3)*ss3];
 		}
 		// inplace
-		S->d[i0 +i1*ds1 +i2*ds2 +i3*ds3] = v * fn;
+		D->d[i0 +i1*ds1 +i2*ds2 +i3*ds3] = v * fn;
 	}
 }
 
@@ -272,8 +270,8 @@ void ltensor_from_image_alpha(LocalTensor* S, LocalTensor* alpha, const Image* i
 
 void ltensor_to_image(const LocalTensor* S, Image* img)
 {
-	int n0=S->s[0], n1=S->s[1], n2=S->s[2];
-	assert(S->s[2] == 3 && S->s[3] == 1);
+	int n0=S->n[0], n1=S->n[1], n2=S->n[2];
+	assert(S->n[2] == 3 && S->n[3] == 1);
 	img_resize(img, n0, n1, IMG_FORMAT_RGB, 0);
 	for (int y=0; y<n1; ++y) {
 		for (int x=0; x<n0; ++x) {
@@ -290,14 +288,14 @@ int ltensor_img_redblue(const LocalTensor* S, Image* img)
 {
 	int R=1;
 
-	if (!(S->s[0]>0 && S->s[1]>0 && S->s[2]==1 && S->s[3]==1))
+	if (!(S->n[0]>0 && S->n[1]>0 && S->n[2]==1 && S->n[3]==1))
 		ERROR_LOG(-1, "ltensor wrong shape for 2d plot: " LT_SHAPE_FMT,
 			LT_SHAPE_UNPACK(*S));
 
 	float mn, mx = ltensor_minmax(S, &mn);
 	float scale = ccMAX(mx, -mn);
 
-	unsigned w=S->s[0], h=S->s[1];
+	unsigned w=S->n[0], h=S->n[1];
 	img_resize(img, w,h, IMG_FORMAT_RGB, 0);
 
 	const float *f = S->d;

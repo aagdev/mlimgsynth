@@ -135,7 +135,7 @@ void anyp_ncast(unsigned long n,
 	case ANY_T_INT64:	return ((L) O (R).i64); \
 	case ANY_T_FLOAT32:	return ((L) O (R).f32); \
 	case ANY_T_FLOAT64:	return ((L) O (R).f64); \
-	default:			break; \
+	default:			return false; \
 	} \
 } while (0)
 

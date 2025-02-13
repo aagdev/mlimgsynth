@@ -10,7 +10,7 @@
 #ifdef TENSORSTORE_USE_GGML
 #include "ggml.h"
 #else
-#include "hpc_ll.h"
+#include "host_ops.h"
 #endif
 
 #define ALIGNMENT_CHECK(PTR,BYTES) \
@@ -218,28 +218,28 @@ int data_convert(int dtype, int stype, size_t n, void* dst, const void* src)
 	}
 #else
 	if (dtype == TS_DTYPE_F32 && stype == TS_DTYPE_F16) {
-		hpc_set_f32_f16(n, dst, src);
+		host_op_set_f32_f16(n, dst, src);
 	}
 	else if (dtype == TS_DTYPE_F16 && stype == TS_DTYPE_F32) {
-		hpc_set_f16_f32(n, dst, src);
+		host_op_set_f16_f32(n, dst, src);
 	}
 	else if (dtype == TS_DTYPE_F32 && stype == TS_DTYPE_F64) {
-		hpc_set_f32_f64(n, dst, src);
+		host_op_set_f32_f64(n, dst, src);
 	}
 	else if (dtype == TS_DTYPE_F32 && stype == TS_DTYPE_Q8_0) {
-		hpc_set_f32_q8_0(n, dst, src);
+		host_op_set_f32_q8_0(n, dst, src);
 	}
 	else if (dtype == TS_DTYPE_F16 && stype == TS_DTYPE_Q8_0) {
-		hpc_set_f16_q8_0(n, dst, src);
+		host_op_set_f16_q8_0(n, dst, src);
 	}
 	else if (dtype == TS_DTYPE_Q8_0 && stype == TS_DTYPE_F16) {
-		hpc_set_q8_0_f16(n, dst, src);
+		host_op_set_q8_0_f16(n, dst, src);
 	}
 	else if (dtype == TS_DTYPE_Q4_1 && stype == TS_DTYPE_Q8_0) {
-		hpc_set_q4_1_q8_0(n, dst, src);
+		host_op_set_q4_1_q8_0(n, dst, src);
 	}
 	else if (dtype == TS_DTYPE_Q8_0 && stype == TS_DTYPE_Q6_K) {
-		hpc_set_q8_0_q6_k(n, dst, src);
+		host_op_set_q8_0_q6_k(n, dst, src);
 	}
 #endif
 	else return -1;

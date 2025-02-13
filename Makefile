@@ -16,8 +16,6 @@ ifndef GGML_INCLUDE_PATH
 GGML_INCLUDE_PATH := ggml/include
 endif
 ifndef GGML_LIB_PATH
-#GGML_LIB_PATH := ggml/Debug/src
-#GGML_LIB_PATH := ggml/RelWithDebInfo/src
 GGML_LIB_PATH := ggml/Release/src
 endif
 cppflags += -I$(GGML_INCLUDE_PATH)

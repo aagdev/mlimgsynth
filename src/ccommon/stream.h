@@ -44,6 +44,8 @@ typedef enum StreamError {
 	STREAM_E_TELL			= -0x10b,
 	STREAM_E_FLUSH			= -0x10c,
 	STREAM_E_DATA			= -0x10d,
+	STREAM_E_CONTROL		= -0x10e,
+	STREAM_E_AGAIN			= -0x10f,
 } StreamError;
 
 enum StreamFlag {
@@ -52,11 +54,9 @@ enum StreamFlag {
 	SF_ALLOW_WRITE		=  4,
 	SF_BUFFER_MANAGE	=  8,
 	SF_END				= 16,  //end of stream reached
-	//SF_MMAP				= 32,  //it's memory mapped
 	//non-blocking
 	//sync
 	//eof? error?
-	SF_CUSTOM_MASK		= 0x7FFF0000,
 };
 
 enum StreamOpenFlag {
@@ -71,7 +71,6 @@ enum StreamOpenFlag {
 	SOF_MMAP			= 64,
 	
 	SOF_WRITE_MASK		= SOF_WRITE|SOF_CREATE|SOF_TRUNCATE|SOF_APPEND,
-	SOF_CUSTOM_MASK		= 0x7FFF0000,
 };
 
 enum StreamCloseFlag {
@@ -87,22 +86,27 @@ enum StreamCloseFlag {
 
 typedef struct Stream Stream;
 
+typedef struct StreamInt {
+	void *p[3];
+} StreamInt;
+
 typedef struct StreamClass {
-	long (*read)(void*restrict, void*restrict, size_t);
-	long (*write)(void*restrict, const void*restrict, size_t);
-	int (*close)(void*);
-	int64_t (*seek)(void*, int64_t, int);
-	int (*flush)(void*);  //fsync
+	long (*read)(StreamInt*restrict, void*restrict, size_t);
+	long (*write)(StreamInt*restrict, const void*restrict, size_t);
+	int (*close)(StreamInt*);
+	int64_t (*seek)(StreamInt*, int64_t, int);
+	int (*flush)(StreamInt*);  //fsync
+	int (*control)(StreamInt*, int, va_list);
 	const char * name;
 } StreamClass;
 
 struct Stream {
 	uint8_t *cursor, *cursor_end;  // Data range
 	uint8_t *buffer, *buffer_end;  // Internal buffer
-	uint64_t			pos;
-	int32_t				flags;
-	const StreamClass *	cls;
-	void *				internal;
+	const StreamClass *cls;
+	StreamInt internal;  //class-specific
+	uint64_t pos;
+	int32_t flags;
 };
 
 /* Check if the stream is ready to be used.
@@ -347,7 +351,30 @@ bool stream_mmap_is(Stream* S) {
  */
 int stream_full_file_load(Stream*restrict S, const char*restrict path);
 
-//
+/* Set and query miscellaneous options of the stream.
+ */
+int stream_control(Stream*restrict S, int cmd, ...);
+
+int stream_control_va(Stream*restrict S, int cmd, va_list ap);
+
+enum {
+	/* Set the stream to non-blocking mode.
+	 * If a read operation would block, instead returns STREAM_E_AGAIN.
+	 * Arg.1 (int) mode. 1: set, 0: unset, -1: query.
+	 * Returns the previous state (1: non-blocking, 0: blocking).
+	 */
+	STREAM_CMD_NON_BLOCK	= 1,
+	/* Set a terminal/console input stream to raw mode.
+	 * Arg.1 (int) mode. 1: set, 0: unset, -1: query.
+	 * Returns the previous state.
+	 */
+	STREAM_CMD_TERM_RAW		= 2,
+};
+
+/*
+	Utility macros
+*/
+
 #define TRY_with_file_stream(PATH, FLAGS, SVAR, EXPR) do { \
 	Stream SVAR={0}; \
 	const char *stm_path_ = (PATH); \
@@ -374,21 +401,26 @@ extern const StreamClass stream_class_memory;
 #if __STDC_HOSTED__
 	extern const StreamClass stream_class_stdio;
 	int stream_stdio_open_handle(Stream*restrict s, FILE*restrict f, int flags);
-	int stream_stdio_open_file(Stream*restrict s, const char*restrict path, int flags);
+	int stream_stdio_open_file(Stream*restrict s, const char*restrict path,
+		int flags);
 #endif
 
 #ifdef __WIN32__
 	extern const StreamClass stream_class_winapi;
 	extern const StreamClass stream_class_winapi_mmap;
 	int stream_winapi_open_handle(Stream* S, void* h, int flags);
-	int stream_winapi_open_file(Stream*restrict S, const char*restrict path, int flags);
+	int stream_winapi_open_file(Stream*restrict S, const char*restrict path,
+		int flags);
 	#define stream_open_file stream_winapi_open_file
+
 #elif defined(__unix__)
 	extern const StreamClass stream_class_posix;
 	extern const StreamClass stream_class_posix_mmap;
 	int stream_posix_open_handle(Stream* S, int fd, int flags);
-	int stream_posix_open_file(Stream*restrict S, const char*restrict path, int flags);
+	int stream_posix_open_file(Stream*restrict S, const char*restrict path,
+		int flags);
 	#define stream_open_file stream_posix_open_file
+
 #else
 	#define stream_open_file stream_stdio_open_file
 #endif

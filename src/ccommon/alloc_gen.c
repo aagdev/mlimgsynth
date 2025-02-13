@@ -406,7 +406,7 @@ void allocator_gen_trim(Allocator* a)
 	}
 }
 
-AllocGenInfo allocator_gen_info(Allocator* a)
+AllocGenInfo allocator_gen_info(const Allocator* a)
 {
 	AllocGenInfo info={0};
 	if (a->alloc == &alloc_gen_alloc && a->ctx) {
@@ -442,6 +442,12 @@ AllocGenInfo allocator_gen_info(Allocator* a)
 		}
 	}
 	return info;
+}
+
+int allocator_gen_empty_is(const Allocator* a)
+{
+	AllocGenInfo info = allocator_gen_info(a);
+	return info.nchunk == info.nseg+1 && info.nchunk == info.nchunkf+1;
 }
 
 // Global allocators

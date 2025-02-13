@@ -29,15 +29,26 @@ int alloc_arena_frombuffer(AllocatorArena*, size_t sz, void* buf);
 #define alloc_arena_fromarray(S, A) \
 	alloc_arena_frombuffer((S), sizeof(A), (A))
 
-// Allocate memory from it
-void * alloc_arena_alloc(AllocatorArena* S, size_t sz);
-
 // Reserve space at least <sz> bytes
 int alloc_arena_reserve(AllocatorArena* S, size_t sz);
 
-// Free all allocations
+// Allocate memory from it
+void* alloc_arena_alloc(AllocatorArena* S, size_t sz);
+
+// Allocates a new blocks of C elements of type T
+#define alloc_arena_new(A, T, C) \
+	((T*)alloc_arena_alloc((A), sizeof(T)*(C)))
+
+// Free all memory used by the arena, including internal
 void alloc_arena_free(AllocatorArena* S);
 
+// Return the last allocation
+// If p is not at the end of the arena, it does nothing.
+void alloc_arena_free_last(AllocatorArena* S, void* p);
+
+//TODO: change prefix to arena_ only ?
+//TODO: free last
+//TODO: free up to ~ rollback
 //TODO: rollback: get mark and free up to it only
 
 void * allocator_arena_alloc(Allocator* a, void* ptr, size_t sz, int flags);

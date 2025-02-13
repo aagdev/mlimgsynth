@@ -398,7 +398,7 @@ int unet_compute_split(MLCtx* C, const UnetParams* P,
 	// First half
 	mlctx_begin(C, "UNet 1/2");
 
-	t_x = mlctx_input_new(C, "x", GGML_TYPE_F32, x->s[0], x->s[1], 4, 1);
+	t_x = mlctx_input_new(C, "x", GGML_TYPE_F32, x->n[0], x->n[1], 4, 1);
 	t_t = mlctx_input_new(C, "t", GGML_TYPE_F32, 1,1,1,1);
 	t_c = mlctx_input_new(C, "c", GGML_TYPE_F32, P->n_ctx, 77, 1, 1);
 	if (P->ch_adm_in)

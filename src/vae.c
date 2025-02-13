@@ -182,11 +182,11 @@ MLTensor* mlb_sdvae_decoder(MLCtx* C, MLTensor* x, const VaeParams* P)
 void sdvae_latent_mean(LocalTensor* latent, const LocalTensor* mom,
 	const VaeParams* P)
 {
-	assert(mom->s[3] == 1 && mom->s[2]%2 == 0);
+	assert(mom->n[3] == 1 && mom->n[2]%2 == 0);
 	if (latent == mom) {
-		latent->s[2] /= 2;
+		latent->n[2] /= 2;
 	} else {
-		ltensor_resize(latent, mom->s[0], mom->s[1], mom->s[2]/2, 1);
+		ltensor_resize(latent, mom->n[0], mom->n[1], mom->n[2]/2, 1);
 		memcpy(latent->d, mom->d, ltensor_nbytes(latent));
 	}
 
@@ -197,15 +197,15 @@ void sdvae_latent_mean(LocalTensor* latent, const LocalTensor* mom,
 void sdvae_latent_sample(LocalTensor* latent, const LocalTensor* mom,
 	const VaeParams* P)
 {
-	assert(mom->s[3] == 1 && mom->s[2]%2 == 0);
-	int n = mom->s[0] * mom->s[1] * mom->s[2]/2;
+	assert(mom->n[3] == 1 && mom->n[2]%2 == 0);
+	int n = mom->n[0] * mom->n[1] * mom->n[2]/2;
 	const float *mean   = mom->d,
 	            *logvar = mom->d + n;
 
 	if (latent == mom)
-		latent->s[2] /= 2;
+		latent->n[2] /= 2;
 	else
-		ltensor_resize(latent, mom->s[0], mom->s[1], mom->s[2]/2, 1);
+		ltensor_resize(latent, mom->n[0], mom->n[1], mom->n[2]/2, 1);
 
 	float *rand = alloc_alloc(g_allocator, n*sizeof(float));
 	rng_randn(n, rand);
@@ -228,12 +228,12 @@ int sdvae_encode(MLCtx* C, const VaeParams* P,
 	const int f = P->f_down,  //latent to image scale (8 for SD)
 	          k = f*8;  //overlap margin to prevent border effects when tiling
 
-	if (!(img->s[0]%f==0 && img->s[1]%f==0 && img->s[2]==3 && img->s[3]==1))
+	if (!(img->n[0]%f==0 && img->n[1]%f==0 && img->n[2]==3 && img->n[3]==1))
 		ERROR_LOG(-1, "invalid input image shape: " LT_SHAPE_FMT,
 			LT_SHAPE_UNPACK(*img));
 	
-	int img_n0 = img->s[0],  n0 = img_n0,
-		img_n1 = img->s[1],  n1 = img_n1;
+	int img_n0 = img->n[0],  n0 = img_n0,
+		img_n1 = img->n[1],  n1 = img_n1;
 
 	if (tile_px > 0) {
 		tile_px = ((tile_px + 63) / 64) * 64;  //rounding up
@@ -326,8 +326,8 @@ int sdvae_decode(MLCtx* C, const VaeParams* P,
 	assert( isfinite( ltensor_sum(latent) ) );
 
 	TRY( ltensor_shape_check_log(latent, "latent", 0,0,4,1) );
-	int lat_n0 = latent->s[0],  n0 = lat_n0,
-		lat_n1 = latent->s[1],  n1 = lat_n1;
+	int lat_n0 = latent->n[0],  n0 = lat_n0,
+		lat_n1 = latent->n[1],  n1 = lat_n1;
 	
 	const int f = P->f_down,  //latent to image scale (8 for SD)
 	          k = 8;  //overlap margin to prevent border effects when tiling

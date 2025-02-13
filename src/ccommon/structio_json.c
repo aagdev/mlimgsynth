@@ -763,7 +763,9 @@ int stio_json_read(StioStream* sio, StioCtx* ctx, StioItem* itm)
 {
 	int c;
 
-	TRYR( stream_space_skip_(sio->s) );
+	c = stream_space_skip_(sio->s);
+	if (c == STREAM_E_EOF) return STIO_E_EOF;
+	if (c < 0) return c;
 
 	if (!ctx)
 	{
@@ -778,6 +780,7 @@ int stio_json_read(StioStream* sio, StioCtx* ctx, StioItem* itm)
 	}
 
 	TRYR( stream_read_prep(sio->s, 1) );
+	
 	if (itm->type == STIO_T_CHUNK)
 	{
 		return stio_json_read_chunk(sio, ctx, &itm->value);

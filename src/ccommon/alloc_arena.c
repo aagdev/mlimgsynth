@@ -24,14 +24,6 @@ int alloc_arena_frombuffer(AllocatorArena * S, size_t sz, void* buf)
 	return 1;
 }
 
-void * alloc_arena_alloc(AllocatorArena* S, size_t sz)
-{
-	if (sz > S->rem && alloc_arena_reserve(S, sz) < 0) return NULL;
-	void * p = S->page->data + S->page->size - S->rem;
-	S->rem -= sz;
-	return p;
-}
-
 int alloc_arena_reserve(AllocatorArena* S, size_t size)
 {
 	if (S->rem >= size) return 0;
@@ -52,10 +44,29 @@ int alloc_arena_reserve(AllocatorArena* S, size_t size)
 	return 1;
 }
 
+void * alloc_arena_alloc(AllocatorArena* S, size_t sz)
+{
+	if (sz > S->rem && alloc_arena_reserve(S, sz) < 0) return NULL;
+	void * p = S->page->data + S->page->size - S->rem;
+	S->rem -= sz;
+	return p;
+}
+
+void alloc_arena_free_last(AllocatorArena* S, void* p_)
+{
+	if (!S->page) return;
+	uint8_t *ini = S->page->data,
+	        *end = S->page->data + S->page->size,
+			*p = p_;
+	if (ini <= p && p < end) {
+		S->rem = end - p;
+	}
+}
+
 void alloc_arena_free(AllocatorArena* S)
 {
 	if (S->al) {  //dynamic storage
-		// Iterate over the page and free them
+		// Iterate over the pages and free them
 		struct AllocArenaPage *cur, *prev=S->page;
 		while ((cur = prev)) {
 			prev = cur->prev;

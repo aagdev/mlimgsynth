@@ -25,6 +25,10 @@ void allocator_gen_trim(Allocator* a);
 // Free all the allocated memory, but not the allocator itself
 //void allocator_gen_free_all(Allocator* a);
 
+// Return nonzero if the allocator has no allocations besides the space
+// used internally. Useful to detect memory leaks.
+int allocator_gen_empty_is(const Allocator* a);
+
 // Return various summary statistics
 // The values are calculated on the spot, so it could be slow.
 typedef struct AllocGenInfo {
@@ -36,4 +40,4 @@ typedef struct AllocGenInfo {
 				nchunkf,	// Number of free chunks
 				nfchunk;
 } AllocGenInfo;
-AllocGenInfo allocator_gen_info(Allocator* a);
+AllocGenInfo allocator_gen_info(const Allocator* a);

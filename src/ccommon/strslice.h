@@ -12,6 +12,8 @@ typedef struct StrSlice {
 	size_t		s;
 } StrSlice;
 
+// Initialization
+
 #define strsl_make(B,S) \
 	((StrSlice){ .b=(B), .s=(S) })
 
@@ -31,9 +33,26 @@ static inline
 StrSlice strsl_fromz(const char* strz)
 	{ return (StrSlice){ .b=strz, .s=strlen(strz) }; }
 
+// Access
+
 static inline
 intptr_t strsl_len(const StrSlice ss)
 	{ return ss.s; }
+
+static inline
+const char * strsl_begin(const StrSlice ss)
+	{ return ss.b; }
+
+static inline
+const char * strsl_end(const StrSlice ss)
+	{ return ss.b + ss.s; }
+
+// Unsafe slice
+static inline
+StrSlice strsl_slice_u(const StrSlice ss, size_t b, size_t e)
+	{ return (StrSlice){ ss.b+b, ss.s-e-b }; }
+
+// Operations
 
 static inline
 int strsl_cmp(const StrSlice s1, const StrSlice s2)

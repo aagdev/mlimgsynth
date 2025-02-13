@@ -111,4 +111,9 @@ __attribute__((format(printf, 1, 2)))
 #endif
 void log_line_strf(const char format[], ...);
 
+static inline
+Stream* log_line_stream() {
+	return g_logger.stm;
+}
+
 void log_line_end();
