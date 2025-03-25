@@ -2,7 +2,6 @@
  * SPDX-License-Identifier: MIT
  */
 #include "sampling.h"
-#include "ids.h"
 #include "ccommon/ccommon.h"
 #include "ccommon/rng_philox.h"
 #include "ccommon/logging.h"
@@ -30,46 +29,48 @@ int dnsamp_init(DenoiseSampler* S)
 {
 	int R=1;
 
-	//if (!(0 <= S->c.s_noise && S->c.s_noise <= 1))
-	//	ERROR_LOG(-1, "snoise out of range");
-
 	// Solver
-	if (!S->c.method) {
-		if (S->c.s_noise > 0 || S->c.s_ancestral > 0)
-			S->c.method = ID_euler;
-		else
-			S->c.method = ID_taylor3;
-	}
-	TRY( solver_init(&S->solver, S->c.method) );
+	if (S->c.method <= 0) S->c.method = SOLVER_METHOD_EULER;
+
+	S->solver.i_step = 0;
+	S->solver.C = solver_class_get(S->c.method);
+	if (!S->solver.C)
+		ERROR_LOG(-1, "invalid sampling method %d", S->c.method);
 	
 	// Scheduling
 	// Compute times and sigmas for inference
 	S->n_step = S->c.n_step;
-	if (S->n_step < 1) S->n_step = 12;
+	if (S->n_step < 1) S->n_step = 20;
 
 	S->nfe_per_step = S->solver.C->n_fe;
+
 	// Reduce number of steps to keep the number of neural function evaluations
 	if (S->nfe_per_step > 1)
 		S->n_step = (S->n_step + S->nfe_per_step-1) / S->nfe_per_step;
 	
 	S->nfe_per_step *= S->nfe_per_dxdt;
 	
+	// Reduces the number of steps to keep the step size the same (img2img)
+	IFNPOSSET(S->c.f_t_ini, 1);
+	S->n_step = S->n_step * (S->c.f_t_ini - S->c.f_t_end) +0.5;
+	if (S->n_step < 1) S->n_step = 1;
+	
+	// Calculate noise levels / times
 	vec_resize(S->sigmas, S->n_step+1);
 	S->sigmas[S->n_step] = 0;
 
-	IFNPOSSET(S->c.f_t_ini, 1);
 	float t_ini = (S->unet_p->n_step_train - 1) * S->c.f_t_ini;
 	float t_end = (S->unet_p->n_step_train - 1) * S->c.f_t_end;
 
-	IFFALSESET(S->c.sched, ID_uniform);
+	IFFALSESET(S->c.sched, DNSAMP_SCHED_UNIFORM);
 	switch (S->c.sched) {
-	case ID_uniform: {
+	case DNSAMP_SCHED_UNIFORM: {
 		float b = t_ini,
 		      f = S->n_step>1 ? (t_end-t_ini)/(S->n_step-1) : 0;
 		for (unsigned i=0; i<S->n_step; ++i)
 			S->sigmas[i] = unet_t_to_sigma(S->unet_p, b+i*f);
 	} break;
-	case ID_karras: {
+	case DNSAMP_SCHED_KARRAS: {
 		// Uses the model's min and max sigma instead of 0.1 and 10.
 		float smin = unet_t_to_sigma(S->unet_p, t_end),
 		      smax = unet_t_to_sigma(S->unet_p, t_ini),
@@ -82,10 +83,9 @@ int dnsamp_init(DenoiseSampler* S)
 			S->sigmas[i] = pow(b+i*f, p);
 	} break;
 	default:
-		ERROR_LOG(-1, "Unknown scheduler '%s'", id_str(S->c.sched));
+		ERROR_LOG(-1, "invalid sampling scheduler %d", S->c.sched);
 	}
 
-	//log_debug_vec("Times" , times , i, 0, "%.6g", times[i]);
 	log_debug_vec("Sigmas", S->sigmas, i, 0, "%.6g", S->sigmas[i]);
 	
 	S->solver.t = S->sigmas[0];  //initial t

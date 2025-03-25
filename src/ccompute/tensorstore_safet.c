@@ -4,9 +4,10 @@
 #include "tensorstore_safet.h"
 #include "ccommon/logging.h"
 #include "ccommon/structio_json.h"
-#include "ids.h"
 #include <assert.h>
 #include <inttypes.h>
+
+#define id_str(X)  strsto_get(S->ss, X).b
 
 #define SAFET_ALIGNMENT 32
 

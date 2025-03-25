@@ -6,9 +6,12 @@
 #pragma once
 #include "ccommon/alloc.h"
 #include "ccommon/logging.h"
-#include "ccommon/image.h"
 #include "ggml.h"
 #include "ggml-backend.h"
+
+#ifdef LOCALTENSOR_USE_IMAGE
+#include "ccommon/image.h"
+#endif
 
 typedef struct LocalTensor {
 	float	*d;  //data
@@ -19,6 +22,8 @@ typedef struct LocalTensor {
 enum {
 	// Memory owned by the tensor
 	LT_F_OWNMEM = 1,
+	// User-specified ready state
+	LT_F_READY  = 2,
 };
 
 #define LT_SHAPE_FMT		"%dx%dx%dx%d"
@@ -152,9 +157,12 @@ void log_ltensor_stats(int loglvl, const LocalTensor* S, const char* desc);
 void ltensor_downsize(LocalTensor* dst, const LocalTensor* src,
 	int f0, int f1, int f2, int f3);
 
+int ltensor_save_stream(const LocalTensor* S, Stream *stm);
 int ltensor_save_path(const LocalTensor* S, const char* path);
+int ltensor_load_stream(LocalTensor* S, Stream *stm);
 int ltensor_load_path(LocalTensor* S, const char* path);
 
+#ifdef LOCALTENSOR_USE_IMAGE
 void ltensor_from_image(LocalTensor* S, const Image* img);
 void ltensor_to_image(const LocalTensor* S, Image* img);
 
@@ -163,6 +171,7 @@ void ltensor_from_image_alpha(LocalTensor* S, LocalTensor* alpha, const Image* i
 
 int ltensor_img_redblue(const LocalTensor* S, Image* img);
 int ltensor_img_redblue_path(const LocalTensor* S, const char* path);
+#endif
 
 #define ltensor_for(T,V,I) \
 	for (unsigned V=(I), V##e_=ltensor_nelements(&(T)); V<V##e_; ++V)

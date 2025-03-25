@@ -22,6 +22,9 @@ ldflags  = $(LDFLAGS)
 
 depflags = -MT $@ -MMD -MP -MF $(depdir)/$*.d
 
+# Options for dynamic libraries
+flags += -fPIC -fvisibility=hidden
+
 ### Compilation options
 ifndef nonative
 cppflags += -march=native
@@ -39,13 +42,16 @@ cppflags += -ggdb -g3 -DDEBUG
 flags += -Og
 else ifdef small
 cppflags += -DNDEBUG
+ldflags += -Wl,--strip-all
 flags += -Os
 else ifdef fast
 cppflags += -DNDEBUG
+ldflags += -Wl,--strip-all
 flags += -O3
 flags += -flto -fwhole-program -fuse-linker-plugin
 else
 cppflags += -DNDEBUG
+ldflags += -Wl,--strip-all
 flags += -O2
 endif
 
@@ -64,25 +70,28 @@ endif
 # Do not remove intermediate files
 .SECONDARY:
 
+### OS specifics
+ifeq ($(OS),Windows_NT)
+EXEC_EXT=.exe
+DLIB_EXT=.dll
+RUN_PRE=
+targets_bin = $(addsuffix $(EXEC_EXT),$(targets)) $(addsuffix $(DLIB_EXT),$(targets_dlib))
+targets_bin2 = $(targets)
+else
+EXEC_EXT=
+DLIB_EXT=.so
+RUN_PRE=./
+targets_bin = $(targets) $(addsuffix $(DLIB_EXT),$(targets_dlib))
+targets_bin2 = 
+endif
+
 ### Commands
 COMPILE_C   = $(CC)  $(depflags) $(flags) $(cppflags) $(cflags)   -c -o $@ $<
 COMPILE_CXX = $(CXX) $(depflags) $(flags) $(cppflags) $(cxxflags) -c -o $@ $<
-#LINK = $(CC) $(flags) $(ldflags) -o $@ $^ $(ldlibs)
-LINK = $(CC) $(flags) $(ldflags) -o $@ \
+LINK_EXEC = $(CC) $(flags) $(ldflags) -o $@$(EXEC_EXT) \
 	$(addprefix $(objdir)/,$(filter %.o,$^)) $(ldlibs)
-
-### OS specifics
-ifeq ($(OS),Windows_NT)
-BIN_EXT=.exe
-RUN_PRE=
-targets_bin = $(addsuffix $(BIN_EXT),$(targets))
-targets_bin2 = $(targets)
-else
-BIN_EXT=
-RUN_PRE=./
-targets_bin = $(targets)
-targets_bin2 = 
-endif
+LINK_DLIB = $(CC) $(flags) $(ldflags) -shared -o $@$(DLIB_EXT) \
+	$(addprefix $(objdir)/,$(filter %.o,$^)) $(ldlibs)
 
 ### Some commonly used dependencies
 #$(info OS=$(OS))
@@ -96,22 +105,28 @@ endif
 sdl_objs += image_sdl.o
 
 ### Rules
-all: $(targets)
-
-remake: clean all
+all: $(targets_dlib) $(targets)
 
 $(targets): | $(objdir) $(depdir)
 ifdef verbose
-	$(LINK)
+	$(LINK_EXEC)
 else
 	@echo "LINK $@"
-	@$(LINK)
+	@$(LINK_EXEC)
 endif
 ifdef run
 	$(RUN_PRE)$@
 endif
 ifdef gdb
 	gdb $@
+endif
+
+$(targets_dlib): | $(objdir) $(depdir)
+ifdef verbose
+	$(LINK_DLIB)
+else
+	@echo "LINK $@"
+	@$(LINK_DLIB)
 endif
 
 $(objdir):

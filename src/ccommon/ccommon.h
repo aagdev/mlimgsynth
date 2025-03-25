@@ -50,6 +50,9 @@
 	memcpy(a, b, sizeof(A)); \
 	memcpy(b, tmp_, sizeof(B)); \
 } while(0)
+
+#define ccFLAG_SET(VAR, FLAG, CTRL) \
+	((VAR) = (CTRL) ? (VAR) | (FLAG) : (VAR) & ~(FLAG))
 	
 #define MEM_ZERO(D)				memset(&(D), 0, sizeof(D))
 #define MEM_COPY(D, S)			memcpy(&(D), &(S), sizeof(D))

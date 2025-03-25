@@ -39,6 +39,7 @@ enum FsDirType {
 	FS_DIR_USER_CONFIG,
 	FS_DIR_USER_CACHE,
 	FS_DIR_USER_DATA,
+	//TODO: system dirs
 };
 // Writes to out the path to choosen system directory.
 // Returns the number of bytes written, <0 on error

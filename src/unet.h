@@ -22,6 +22,7 @@ typedef struct {
 	int ch_adm_in;
 
 	unsigned clip_norm:1,
+	         cond_label:1,
 	         uncond_empty_zero:1,
 			 vparam:1;
 	
@@ -48,7 +49,7 @@ float unet_t_to_sigma(const UnetParams* P, float t);
 typedef struct {
 	MLCtx *ctx;
 	const UnetParams *par;
-	unsigned nfe, i_step, n_step, split:1;
+	unsigned nfe, split:1;
 } UnetState;
 
 int unet_denoise_init(UnetState* S, MLCtx* C, const UnetParams* P,

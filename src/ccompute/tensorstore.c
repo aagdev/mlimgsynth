@@ -165,6 +165,7 @@ void tstore_tensor_free(TSTensorEntry* S)
 		tstore_tdata_free_force(&S->cache[i]);	
 	vec_free(S->cache);
 }
+#define tstore_tensor_cache_free tstore_tensor_free
 
 uint64_t tstore_tensor_count(const TSTensorEntry* S)
 {
@@ -507,6 +508,14 @@ int tstore_tensor_index_remake(TensorStore* S)
 	vec_for(S->tensors,i,0) {
 		int key = S->tensors[i].key;
 		INDEX_INSERT(tensors, i, key);
+	}
+	return 1;
+}
+
+int tstore_cache_clear(TensorStore* S)
+{
+	vec_for(S->tensors, i, 0) {
+		tstore_tensor_cache_free(&S->tensors[i]);	
 	}
 	return 1;
 }

@@ -6,25 +6,32 @@
  *
  * Example:
 
-Solver sol={ .C=&solver_euler };
-sol.t = 0; //initial
-ltensor_resize_zero(&sol.x, 100,1,1,1);
-sol.x.d[50] = 1;
-
 int dxdt(Solver* S, float t, const LocalTensor* x, LocalTensor* dx) {
-	unsigned n = x->s[0];
+	unsigned n = x->n[0];
 	for (unsigned i=1; i+1<n; ++i)
 		dx->d[i] = (x->d[i-1] -2*x->d[i] + x->d[i+1]) / 4;
 	dx->d[0] = dx->d[n-1] = 0;
 	return 1;
 }
 
-sol.dxdt = dxdt;
-
-for (float dt=0.1, t_end=10, t=dt; t<=t_end; t+=dt)
-	TRY( solver_step(&sol, t) );
-
-TRY( ltensor_save_path(&sol.x, "result.tensor") );
+void solve() {
+	// Set solver
+	Solver sol={ .C=&solver_euler };
+	// Set initial time
+	sol.t = 0; 
+	// Set initial state
+	ltensor_resize_zero(&sol.x, 100,1,1,1);
+	sol.x.d[50] = 1;
+	// Set differential equation
+	sol.dxdt = dxdt;
+	// Solve until t_end=10
+	for (float dt=0.1, t_end=10, t=dt; t<=t_end; t+=dt)
+		TRY( solver_step(&sol, t) );
+	// Do something here with the result in sol.x .
+	// You may reuse the solver by setting i_step to zero.
+	// Free memory
+	solver_free(&sol);
+}
  */
 #pragma once
 #include "localtensor.h"
@@ -34,19 +41,29 @@ struct Solver;
 typedef struct {
 	int (*step)(struct Solver*, float dt, LocalTensor* x);
 	int n_fe;  //number of calls to dxdt per step
-	int name;  //string id
+	const char *name;
 } SolverClass;
 
+// Default methods
 extern const SolverClass g_solver_euler;
 extern const SolverClass g_solver_heun;
 extern const SolverClass g_solver_taylor3;
 extern const SolverClass g_solver_dpmpp2m;
 extern const SolverClass g_solver_dpmpp2s;
 
-extern const SolverClass *g_solvers[];  //list of all available solvers
+enum {
+	SOLVER_METHOD_EULER		= 1,
+	SOLVER_METHOD_HEUN		= 2,
+	SOLVER_METHOD_TAYLOR3	= 3,
+	SOLVER_METHOD_DPMPP2M	= 4,
+	SOLVER_METHOD_DPMPP2S	= 5,
+};
+
+const SolverClass* solver_class_get(int idx);  //idx >= 1
+const SolverClass* solver_class_find(const char* name);
 
 typedef struct Solver {
-	const SolverClass *C;
+	const SolverClass *C;  // Fill before using
 
 	// State
 	LocalTensor dx,
@@ -61,8 +78,6 @@ typedef struct Solver {
 
 void solver_free(Solver* S);
 
-int solver_init(Solver* S, int clsname);
-
 int solver_step(Solver* S, float t, LocalTensor* x);
 
 static inline
@@ -72,30 +87,4 @@ int solver_dxdt(Solver* S, float t, const LocalTensor* x, LocalTensor* dx)
 	int r = S->dxdt(S, t, x, dx);
 	if (r < 0) return r;
 	return r;
-}
-
-// Internal use
-
-static inline
-LocalTensor* solver_tmp_get(Solver* S)
-{
-	assert( S->i_tmp < COUNTOF(S->tmp) );
-	S->i_tmp++;
-	return &S->tmp[S->i_tmp-1];
-}
-
-static inline
-LocalTensor* solver_tmp_get_resize(Solver* S, int n0, int n1, int n2, int n3)
-{
-	LocalTensor* lt = solver_tmp_get(S);
-	ltensor_resize(lt, n0, n1, n2, n3);
-	return lt;
-}
-
-static inline
-LocalTensor* solver_tmp_get_resize_like(Solver* S, const LocalTensor* x)
-{
-	LocalTensor* lt = solver_tmp_get(S);
-	ltensor_resize_like(lt, x);
-	return lt;
 }

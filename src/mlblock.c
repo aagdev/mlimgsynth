@@ -106,7 +106,7 @@ int mlctx_build(MLCtx* C, MLTensor* result)
 	
 	if (C->c.dump) {
 		DynStr path = dstr_stack(64);
-		dstr_printf(path, "%s-graph.txt", C->c.name);
+		dstr_printf(path, "dump-graph-%s.txt", C->c.name);
 		TRYR( mlctx_block_graph_dump_path(C, path) );
 	}
 	

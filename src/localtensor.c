@@ -113,22 +113,24 @@ LocalTensorStats ltensor_stat(const LocalTensor* S)
 		hsum[i/hsep] += v;
 	}
 	stat.asum = asum;
+	
+	stat.hash[0] = 0;
+	if (isfinite(stat.asum)) {
+		double hmn=hsum[0], hmx=hmn;
+		for (unsigned i=1; i<8; ++i) {
+			MINSET(hmn, hsum[i]);
+			MAXSET(hmx, hsum[i]);
+		}
 
-	double hmn=hsum[0], hmx=hmn;
-	for (unsigned i=1; i<8; ++i) {
-		MINSET(hmn, hsum[i]);
-		MAXSET(hmx, hsum[i]);
+		// Convert each sum to a character to allow fast checking by a human
+		double f = (hmx > hmn) ? (63 / (hmx - hmn)) : 0;
+		for (unsigned i=0; i<8; ++i) {
+			int idx = (hsum[i] - hmn) * f;
+			assert( 0 <= idx && idx < 64 );
+			stat.hash[i] = g_base64_chars[idx];
+		}
+		stat.hash[8] = 0;
 	}
-
-	// Convert each sum to a character to fast checking by a human
-	double f = (hmx > hmn) ? (64 / (hmx - hmn)) : 0;
-	f = nextafter(f, 0);
-	for (unsigned i=0; i<8; ++i) {
-		int idx = (hsum[i] - hmn) * f;
-		assert( 0 <= idx && idx < 64 );
-		stat.hash[i] = g_base64_chars[idx];
-	}
-	stat.hash[8] = 0;
 
 	stat.valid = 1;
 	return stat;
@@ -191,6 +193,14 @@ void ltensor_downsize(LocalTensor* D, const LocalTensor* A,
 	}
 }
 
+int ltensor_save_stream(const LocalTensor* S, Stream *stm)
+{
+	// Similar to the PNM image format
+	stream_printf(stm, "TENSOR F32 %d %d %d %d\n", LT_SHAPE_UNPACK(*S));
+	stream_write(stm, ltensor_nbytes(S), S->d);
+	return 1;
+}
+
 int ltensor_save_path(const LocalTensor* S, const char* path)
 {
 	int R=1;
@@ -198,21 +208,15 @@ int ltensor_save_path(const LocalTensor* S, const char* path)
 	log_debug("Writing tensor to '%s'", path);
 	TRY_LOG( stream_open_file(&stm, path, SOF_CREATE),
 		"could not open '%s'", path);
-	// Similar to the PNM image format
-	stream_printf(&stm, "TENSOR F32 %d %d %d %d\n", LT_SHAPE_UNPACK(*S));
-	stream_write(&stm, ltensor_nbytes(S), S->d);
+	TRY( ltensor_save_stream(S, &stm) );
 end:
 	stream_close(&stm, 0);
 	return R;
 }
 
-int ltensor_load_path(LocalTensor* S, const char* path)
+int ltensor_load_stream(LocalTensor* S, Stream *stm)
 {
-	int R=1;
-	Stream stm={0};
-	log_debug("Reading tensor from '%s'", path);
-	TRY_LOG( stream_open_file(&stm, path, SOF_READ), "could not open '%s'", path);
-	char *end, *cur = stream_read_buffer(&stm, &end);
+	char *end, *cur = stream_read_buffer(stm, &end);
 	if (!(cur+24 < end) || memcmp(cur, "TENSOR F32 ", 11)) goto error_fmt;
 	cur += 11;
 	int s[4]={1,1,1,1};
@@ -226,15 +230,29 @@ int ltensor_load_path(LocalTensor* S, const char* path)
 		if (i==3 || *cur != ' ') goto error_fmt;
 		cur++;
 	}
-	stream_commit(&stm, cur);
+	stream_commit(stm, cur);
 	ltensor_resize(S, s[0], s[1], s[2], s[3]);
-	stream_read(&stm, ltensor_nbytes(S), S->d);
+	stream_read(stm, ltensor_nbytes(S), S->d);
+	return 1;
+error_fmt:
+	return -1;
+}
+
+int ltensor_load_path(LocalTensor* S, const char* path)
+{
+	int R=1;
+	Stream stm={0};
+	log_debug("Reading tensor from '%s'", path);
+	TRY_LOG( stream_open_file(&stm, path, SOF_READ),
+		"could not open '%s'", path);
+	TRY_LOG( ltensor_load_stream(S, &stm),
+		"file '%s' is not a valid tensor", path);
 end:
 	stream_close(&stm, 0);
 	return R;
-error_fmt:
-	ERROR_LOG(-1, "file '%s' is not a valid tensor", path);
 }
+
+#ifdef LOCALTENSOR_USE_IMAGE
 
 void ltensor_from_image(LocalTensor* S, const Image* img)
 {
@@ -324,3 +342,5 @@ end:
 	img_free(&img);
 	return R;
 }
+
+#endif /* LOCALTENSOR_USE_IMAGE */

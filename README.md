@@ -54,13 +54,18 @@ Lora's can be loaded indivually with the option `--lora PATH:MULT` or with the o
 
 To accelerate and reduce the memory usage during the image decoding, you may use the [TAE](https://github.com/madebyollin/taesd) (tiny autoencoder) in place of the VAE (variational autoencoder) of SD. Download the weights compatible with SD or SDXL, and pass the path to them with the option `--tae TAE.safetensors` to enable it. Be warned that this reduces the final images quality. If you are low on memory, it is preferable to use the `--vae-tile 512` option.
 
+## Library
+
+All the important fuctionally is a library (libmlimgsynth) that you can use from your own programs. There are example of usage for C (`src/demo_mlimgsynth.c`) and for python (`python/mlimgsynth.py` and `python/guessing_game.py`).
+
 ## Future plans
 
-- Allow non-ascii characters in the prompt.
-- Parse parenthesis in the prompt to change relative weights, e.g. `a (large) dog`.
+- Complete prompt preprocessing to allow non-ascii characters and parse weighting (e.g. `a (large) dog`).
 - Support for GGUF and quantized models.
-- ControlNet
+- API server and minimal web UI.
+- ControlNet.
 - Maybe SDE sampling. The biggest hurdle is understanding what it is doing the `torchsde.BrownianTree` used in `k-diffusion`.
+- Other models?
 
 ## License
 Most of this program is licensed under the MIT (see the file `LICENSE`), with the exceptions of the files in the directory `src/ccommon` which use the ZLib license (see the file `LICENSE.zlib`). To prevent any confusion, each file indicates its license at the beginning using the SPDX identifier.

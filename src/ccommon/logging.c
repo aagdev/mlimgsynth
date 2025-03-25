@@ -27,7 +27,10 @@ void log_line_begin_raw(int level)
 	else if (level >= LOG_LVL_WARNING) lvl_prefix = "WARN  ";
 	else                               lvl_prefix = "ERROR ";
 
-	//TODO time
+	//TODO: time (optional)
+	
+	if (g_logger.prefix)
+		stream_str_put(g_logger.stm, g_logger.prefix);
 
 	if (lvl_prefix)
 		stream_str_put(g_logger.stm, lvl_prefix);

@@ -2,31 +2,42 @@
  * SPDX-License-Identifier: MIT
  */
 #include "solvers.h"
-#include "ids.h"
 #include "ccommon/ccommon.h"
 #include <math.h>
+
+// List of all available solvers. Null-terminated. Matches MLIS_Method.
+const SolverClass *g_solvers[] = {
+	NULL,
+	&g_solver_euler,
+	&g_solver_heun,
+	&g_solver_taylor3,
+	&g_solver_dpmpp2m,
+	&g_solver_dpmpp2s,
+	NULL
+};
+
+const SolverClass* solver_class_get(int idx)
+{
+	if (!(0 <= idx && idx < COUNTOF(g_solvers)))
+		return NULL;
+
+	return g_solvers[idx];
+}
+
+const SolverClass* solver_class_find(const char* name)
+{
+	for (unsigned i=0; g_solvers[i]; ++i)
+		if (!strcmp(name, g_solvers[i]->name))
+			return g_solvers[i];
+
+	return NULL;
+}
 
 void solver_free(Solver* S)
 {
 	for (unsigned i=0; i<COUNTOF(S->tmp); ++i)
 		ltensor_free(&S->tmp[i]);
 	ltensor_free(&S->dx);
-}
-
-int solver_init(Solver* S, int clsname)
-{
-	int R=1;
-	const SolverClass *cls=NULL;
-	for (unsigned i=0; g_solvers[i]; ++i) {
-		if (clsname == g_solvers[i]->name) {
-			cls = g_solvers[i];
-		}
-	}
-	if (!cls) ERROR_LOG(-1, "Unknown solver '%s'", id_str(clsname));
-	S->C = cls;
-	S->i_step = 0;
-end:
-	return R;
 }
 
 int solver_step(Solver* S, float t, LocalTensor* x)
@@ -38,6 +49,30 @@ int solver_step(Solver* S, float t, LocalTensor* x)
 	S->t = t;
 	S->i_step++;
 	return r;
+}
+
+static inline
+LocalTensor* solver_tmp_get(Solver* S)
+{
+	assert( S->i_tmp < COUNTOF(S->tmp) );
+	S->i_tmp++;
+	return &S->tmp[S->i_tmp-1];
+}
+
+static inline
+LocalTensor* solver_tmp_get_resize(Solver* S, int n0, int n1, int n2, int n3)
+{
+	LocalTensor* lt = solver_tmp_get(S);
+	ltensor_resize(lt, n0, n1, n2, n3);
+	return lt;
+}
+
+static inline
+LocalTensor* solver_tmp_get_resize_like(Solver* S, const LocalTensor* x)
+{
+	LocalTensor* lt = solver_tmp_get(S);
+	ltensor_resize_like(lt, x);
+	return lt;
 }
 
 /* Euler
@@ -55,7 +90,7 @@ int solver_euler_step(Solver* S, float t, LocalTensor* x)
 const SolverClass g_solver_euler = {
 	.step = solver_euler_step,
 	.n_fe = 1,
-	.name = ID_euler,
+	.name = "euler",
 };
 
 /* Heun (improved Euler)
@@ -86,7 +121,7 @@ int solver_heun_step(Solver* S, float t, LocalTensor* x)
 const SolverClass g_solver_heun = {
 	.step = solver_heun_step,
 	.n_fe = 2,
-	.name = ID_heun,
+	.name = "heun",
 };
 
 /* Third-order-Taylor extension of Euler
@@ -132,7 +167,7 @@ int solver_taylor3_step(Solver* S, float t, LocalTensor* x)
 const SolverClass g_solver_taylor3 = {
 	.step = solver_taylor3_step,
 	.n_fe = 1,
-	.name = ID_taylor3,
+	.name = "taylor3",
 };
 
 /* DPM++(2M)
@@ -198,7 +233,7 @@ int solver_dpmpp2m_step(Solver* S, float t, LocalTensor* x)
 const SolverClass g_solver_dpmpp2m = {
 	.step = solver_dpmpp2m_step,
 	.n_fe = 1,
-	.name = ID_dpmpp2m,
+	.name = "dpmpp2m",
 };
 
 /* DPM++(2S)
@@ -257,16 +292,5 @@ int solver_dpmpp2s_step(Solver* S, float t, LocalTensor* x)
 const SolverClass g_solver_dpmpp2s = {
 	.step = solver_dpmpp2s_step,
 	.n_fe = 2,
-	.name = ID_dpmpp2s,
-};
-
-/* */
-
-const SolverClass *g_solvers[] = {
-	&g_solver_euler,
-	&g_solver_heun,
-	&g_solver_taylor3,
-	&g_solver_dpmpp2m,
-	&g_solver_dpmpp2s,
-	NULL
+	.name = "dpmpp2s",
 };

@@ -271,3 +271,7 @@ TSTensorEntry* tstore_tensor_get(const TensorStore* S, const char* name) {
  * Call after changing the tensor manually.
  */
 int tstore_tensor_index_remake(TensorStore* S);
+
+/* Free all stored tensor data.
+ */
+int tstore_cache_clear(TensorStore* S);

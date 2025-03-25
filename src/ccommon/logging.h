@@ -49,7 +49,8 @@ enum LoggingLevel {
 // Interface
 struct Logger {
 	int			level;
-	Stream *	stm;
+	Stream		*stm;
+	const char  *prefix;  // Prefix for all messages
 };
 
 extern struct Logger g_logger;

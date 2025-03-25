@@ -6,6 +6,13 @@
 #include "solvers.h"
 #include "localtensor.h"
 
+// Schedulers. Matches MLIS_Sched.
+//TODO: classes?
+enum {
+	DNSAMP_SCHED_UNIFORM	= 1,
+	DNSAMP_SCHED_KARRAS		= 2,
+};
+
 typedef struct {
 	Solver solver;
 	float *sigmas;  //vector

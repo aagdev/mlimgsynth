@@ -73,6 +73,7 @@ const UnetParams g_unet_sdxl = {
 	.ch_adm_in		= 2816,
 
 	.clip_norm		= false,
+	.cond_label		= true,
 	.uncond_empty_zero = true,
 	
 	.n_step_train   = 1000,
@@ -481,8 +482,7 @@ int unet_denoise_run(UnetState* S,
 	t_comp = timing_time() - t_comp;
 	//log_debug("dx  %.6e", ltensor_mean(dx));
 	S->nfe++;
-	log_info("Step %u/%u NFE %d done {%.3fs}",
-		S->i_step+1, S->n_step, S->nfe, t_comp);
+	log_info("NFE %d done {%.3fs}", S->nfe, t_comp);
 	
 	TRY_LOG( ltensor_finite_check(dx), "NaN found in UNet output");
 

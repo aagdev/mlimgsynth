@@ -33,16 +33,16 @@ void rng_philox_randn(RngPhilox* S, unsigned n, float* out)
 		key[1] = S->seed>>32;
 
 		for (unsigned r=0; r<10; ++r) {
-				// Round
-				uint64_t v1 = (uint64_t)cnt[0] * philox_m[0];
-				uint64_t v2 = (uint64_t)cnt[2] * philox_m[1];
-				cnt[0] = (uint32_t)(v2>>32) ^ cnt[1] ^ key[0];
-				cnt[1] = v2;
-				cnt[2] = (uint32_t)(v1>>32) ^ cnt[3] ^ key[1];
-				cnt[3] = v1;
+			// Round
+			uint64_t v1 = (uint64_t)cnt[0] * philox_m[0];
+			uint64_t v2 = (uint64_t)cnt[2] * philox_m[1];
+			cnt[0] = (uint32_t)(v2>>32) ^ cnt[1] ^ key[0];
+			cnt[1] = v2;
+			cnt[2] = (uint32_t)(v1>>32) ^ cnt[3] ^ key[1];
+			cnt[3] = v1;
 
-				key[0] += philox_w[0];
-				key[1] += philox_w[1];
+			key[0] += philox_w[0];
+			key[1] += philox_w[1];
 		}
 
 		out[i] = box_muller(cnt[0], cnt[1]);
