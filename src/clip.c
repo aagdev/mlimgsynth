@@ -155,7 +155,7 @@ int clip_tokr_tokenize(ClipTokenizer* S, const char* cur, int32_t** pout)
 			while (cur<end && chr_letter_is(*cur)) cur++;
 		}
 		else if (chr_digit_is(*beg)) {
-			//while (cur<end && chr_digit_is(*cur)) cur++;
+			while (cur<end && chr_digit_is(*cur)) cur++;
 		}
 		else if (*beg == '\'') {
 			if (cur[0] == 's') cur++;

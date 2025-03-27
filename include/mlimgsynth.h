@@ -147,6 +147,27 @@ typedef enum MLIS_TensorUseFlag {
 	MLIS_TUF_CONDITIONING	= 16,  //all conditioning (cond, label, ncond, ...)
 } MLIS_TensorUseFlag;
 
+/* Image synthesis model types (e.g. Stable Diffusion).
+ */
+typedef enum MLIS_ModelType {
+	MLIS_MODEL_TYPE_NONE	= 0,
+	MLIS_MODEL_TYPE_SD1		= 1,
+	MLIS_MODEL_TYPE_SD2		= 2,
+	MLIS_MODEL_TYPE_SDXL	= 3,
+	MLIS_MODEL_TYPE__LAST	= 3,
+} MLIS_ModelType;
+
+/* Individual models used for each stage internally.
+ */
+typedef enum MLIS_Model {
+	MLIS_MODEL_NONE			= 0,
+	MLIS_MODEL_UNET			= 1,
+	MLIS_MODEL_VAE			= 2,
+	MLIS_MODEL_TAE			= 3,
+	MLIS_MODEL_CLIP			= 4,
+	MLIS_MODEL_CLIP2		= 5,
+} MLIS_Model;
+
 /* Options.
  * Set with mlis_option_set.
  */
@@ -274,7 +295,7 @@ typedef enum MLIS_Option {
 	MLIS_OPT_UNET_SPLIT = 26,
 
 	// Number CPU threads used by the backend.
-	// Arg: int
+	// Arg: (int)
 	MLIS_OPT_THREADS = 27,
 
 	// (debug) Control dumping of tensors and graphs information to files.
@@ -303,10 +324,16 @@ typedef enum MLIS_Option {
 	// Logging level.
 	// Internal messages with less or equal level will be printed.
 	// Currently prints to stderr, in the future a callback may be added.
-	// Arg: MLIS_LogLvl
+	// Arg: (MLIS_LogLvl)
 	MLIS_OPT_LOG_LEVEL = 32,
+
+	// Model type.
+	// You may use this options to force a model type without detection, or to
+	// retrieve the detected type after mlis_setup is called.
+	// Arg: (MLIS_ModelType)
+	MLIS_OPT_MODEL_TYPE = 33,
 	
-	MLIS_OPT__LAST = 32,
+	MLIS_OPT__LAST = 33,
 } MLIS_Option;
 
 /* Structures */
@@ -406,6 +433,13 @@ int mlis_option_set(MLIS_Ctx* ctx, MLIS_Option id, ...);
  */
 int mlis_option_set_str(MLIS_Ctx* ctx, const char* name, const char* value);
 
+/* Get the value(s) of an option.
+ * Same number and type of arguments as for mlis_option_set, but here all arguments
+ * must be pointers to suitable variables.
+ * Returns 1 on success, and < 0 on error.
+ */
+int mlis_option_get(MLIS_Ctx* ctx, MLIS_Option id, ...);
+
 /* Generate an image.
  * If a callback is set, it will be called during the process to report the
  * progress, and you may abort the generation returning a negative value.
@@ -445,6 +479,7 @@ const MLIS_BackendInfo* mlis_backend_info_get(MLIS_Ctx* ctx, unsigned idx,
 /* String-Id conversion functions. */
 
 const char * mlis_stage_str(MLIS_Stage id);
+const char * mlis_stage_desc(MLIS_Stage id);  // Pretty description
 MLIS_Stage mlis_stage_fromz(const char* str);
 
 const char * mlis_method_str(MLIS_Method id);
@@ -453,14 +488,19 @@ MLIS_Method mlis_method_fromz(const char* str);
 const char * mlis_sched_str(MLIS_Scheduler id);
 MLIS_Scheduler mlis_sched_fromz(const char* str);
 
-MLIS_LogLvl mlis_loglvl_fromz(const char* str);
 const char* mlis_loglvl_str(MLIS_LogLvl id);
+MLIS_LogLvl mlis_loglvl_fromz(const char* str);
 
-MLIS_Option mlis_option_fromz(const char* str);
+const char* mlis_model_type_str(MLIS_ModelType id);
+const char* mlis_model_type_desc(MLIS_ModelType id);
+MLIS_ModelType mlis_model_type_fromz(const char* str);
+
 const char* mlis_option_str(MLIS_Option id);
+MLIS_Option mlis_option_fromz(const char* str);
 
 /* The following functions allow you to do some internal operations manually.
  * It is not needed normally.
+ * These interfaces may change in the future.
  */
 
 int mlis_image_encode(MLIS_Ctx* ctx, const MLIS_Tensor* image, MLIS_Tensor* latent,
@@ -472,6 +512,13 @@ int mlis_image_decode(MLIS_Ctx* ctx, const MLIS_Tensor* latent, MLIS_Tensor* ima
 int mlis_mask_encode(MLIS_Ctx* ctx, const MLIS_Tensor* mask, MLIS_Tensor* lmask,
 	int flags);
 
+/* Tokenize <text> using <model> (usually MLIS_MODEL_CLIP).
+ * Return the number of tokens or a negative value on error.
+ * ptokens: will be set to point to an array with the tokens id's.
+ */
+int mlis_text_tokenize(MLIS_Ctx* ctx, const char* text, const int32_t** ptokens,
+	MLIS_Model model);
+
 /* Encode a text using a CLIP model.
  * Returns the embeddings and feature tensors (optional).
  * Requires a CLIP model with the text projection tensor.
@@ -479,8 +526,8 @@ int mlis_mask_encode(MLIS_Ctx* ctx, const MLIS_Tensor* mask, MLIS_Tensor* lmask,
  * The cosine similarity between two feature tensors can be used to estimate the
  * similarity between to inputs.
  */
-int mlis_clip_text_encode(MLIS_Ctx* S, const char* text,
-	MLIS_Tensor* embed, MLIS_Tensor* feat, int model_idx, int flags);
+int mlis_clip_text_encode(MLIS_Ctx* ctx, const char* text,
+	MLIS_Tensor* embed, MLIS_Tensor* feat, MLIS_Model model, int flags);
 
 enum {  // Flags for mlis_clip_text_encode
 	MLIS_CTEF_NO_NORM = 1,

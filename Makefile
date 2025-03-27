@@ -1,5 +1,6 @@
 # Makefile
-targets = test_rng tstore-util demo_mlimgsynth mlimgsynth
+targets = test_rng tstore-util demo_mlimgsynth mlimgsynth \
+	test_text_tokenize_clip
 targets_dlib = libmlimgsynth
 
 # Put your custom definitions in Makefile.local instead of changing this file
@@ -60,9 +61,11 @@ endif
 # libmlimgsynth
 demo_mlimgsynth: ldlibs += -lmlimgsynth
 mlimgsynth: ldlibs += -lmlimgsynth
+test_text_tokenize_clip: ldlibs += -lmlimgsynth
 ifndef MLIS_NO_RUNPATH
 demo_mlimgsynth: ldflags += -Wl,-rpath,.
 mlimgsynth: ldflags += -Wl,-rpath,.
+test_text_tokenize_clip: ldflags += -Wl,-rpath,.
 endif
 
 # GCC 13.3.1 20240614 warns about dstr_appendz and dstr_insertz
@@ -91,3 +94,5 @@ demo_mlimgsynth: demo_mlimgsynth.o
 
 mlimgsynth: $(objs_base) image.o image_io.o image_io_pnm.o \
 	localtensor.o main_mlimgsynth.o
+
+test_text_tokenize_clip: test_text_tokenize_clip.o

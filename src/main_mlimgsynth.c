@@ -36,6 +36,7 @@ APP_NAME_VERSION "\n"
 "  vae-decode           Decode a latent to an image.\n"
 "  vae-test             Encode and decode an image.\n"
 "  clip-encode          Encode a prompt with the CLIP tokenizer and model.\n"
+"  tokenize             Tokenize text (testing).\n"
 "  check                Checks that all the operations (models) are working.\n"
 "\n"
 "Generation options:\n"
@@ -249,29 +250,6 @@ int mlis_cli_opt_set(void* userdata, const char* optname, const char* next_value
 		return ARG_PARSE_NEXT_USED;
 	}
 
-	return 1;
-}
-
-int mlis_cli_backends_print(MLIS_CliOptions* opt, MLIS_Ctx* ctx)
-{
-	Stream out={0};
-	TRYR( stream_open_std(&out, STREAM_STD_OUT, 0) );
-
-	const MLIS_BackendInfo *bi;
-	for (unsigned idx=0; (bi = mlis_backend_info_get(ctx, idx, 0)); ++idx)
-	{
-		stream_printf(&out, "%s\n", bi->name);
-		for (unsigned idev=0; idev < bi->n_dev; ++idev)
-		{
-			stream_printf(&out, "\t%s '%s' %.1f/%.1fGiB\n",
-				bi->devs[idev].name,
-				bi->devs[idev].desc,
-				bi->devs[idev].mem_free * F_GIB,
-				bi->devs[idev].mem_total * F_GIB );
-			}
-	}
-
-	stream_close(&out, 0);
 	return 1;
 }
 
@@ -582,12 +560,45 @@ end:
 int mlis_cli_clip_cmd(MLIS_CliOptions* opt, MLIS_Ctx* ctx)
 {
 	int R=1;
-	ERROR_LOG(-1, "not implemented");
+
+	MLIS_Tensor *t_embed = mlis_tensor_get(ctx, MLIS_TENSOR_TMP);
+	MLIS_Tensor *t_feat  = mlis_tensor_get(ctx, MLIS_TENSOR_TMP+1);
 	
-	//mlis_option_get(ctx, MLIS_OPT_PROMPT, &prompt);  //TODO
-	//mlis_clip_text_encode(ctx, prompt, &t_embed, &t_feat, 0, 0);
+	const char *prompt;
+	mlis_option_get(ctx, MLIS_OPT_PROMPT, &prompt);
+	
+	//TODO: not all models have the text projection tensor needef for the features
+	//      make feat optional. flag?
+	mlis_clip_text_encode(ctx, prompt, t_embed, t_feat, MLIS_MODEL_CLIP, 0);
+
+	//TODO: configurable paths
+	TRY( cli_tensor_save(t_embed, "clip-embed.tensor") );
+	TRY( cli_tensor_save(t_feat , "clip-feat.tensor") );
 
 end:
+	return R;
+}
+
+int mlis_tokenize_cmd(MLIS_CliOptions* opt, MLIS_Ctx* ctx)
+{
+	int R=1;
+	Stream out={0};
+	TRY( stream_open_std(&out, STREAM_STD_OUT, 0) );
+	
+	const char *prompt;
+	mlis_option_get(ctx, MLIS_OPT_PROMPT, &prompt);
+	
+	const int32_t *tokens;
+	int r = mlis_text_tokenize(ctx, prompt, &tokens, MLIS_MODEL_CLIP);
+
+	for (int i=0; i<r; ++i) {
+		if (i) stream_char_put(&out, ' ');
+		stream_printf(&out, "%d", tokens[i]);	
+	}
+	stream_char_put(&out, '\n');
+
+end:
+	stream_close(&out, 0);
 	return R;
 }
 
@@ -597,6 +608,29 @@ int mlis_cli_check(MLIS_CliOptions* opt, MLIS_Ctx* ctx)
 	ERROR_LOG(-1, "not implemented");
 end:
 	return R;
+}
+
+int mlis_cli_backends_print(MLIS_CliOptions* opt, MLIS_Ctx* ctx)
+{
+	Stream out={0};
+	TRYR( stream_open_std(&out, STREAM_STD_OUT, 0) );
+
+	const MLIS_BackendInfo *bi;
+	for (unsigned idx=0; (bi = mlis_backend_info_get(ctx, idx, 0)); ++idx)
+	{
+		stream_printf(&out, "%s\n", bi->name);
+		for (unsigned idev=0; idev < bi->n_dev; ++idev)
+		{
+			stream_printf(&out, "\t%s '%s' %.1f/%.1fGiB\n",
+				bi->devs[idev].name,
+				bi->devs[idev].desc,
+				bi->devs[idev].mem_free * F_GIB,
+				bi->devs[idev].mem_total * F_GIB );
+			}
+	}
+
+	stream_close(&out, 0);
+	return 1;
 }
 
 int main(int argc, char* argv[])
@@ -662,6 +696,9 @@ int main(int argc, char* argv[])
 	}
 	IF_CMD("clip-encode") {
 		TRY( mlis_cli_clip_cmd(&opt, ctx) );
+	}
+	IF_CMD("tokenize") {
+		TRY( mlis_tokenize_cmd(&opt, ctx) );
 	}
 	IF_CMD("check") {
 		TRY( mlis_cli_check(&opt, ctx) );

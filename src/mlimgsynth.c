@@ -170,12 +170,12 @@ int strsl_cmpz_id(const StrSlice ss, const char* strz)
 
 #define IMPL_ENUM_FUNC(NAME, TYPE, DEFAULT) \
 const char * mlis_##NAME##_str(TYPE x) { \
-	if (!(0 <= x && x < COUNTOF(g_##NAME##_str))) return "???"; \
-	return g_##NAME##_str[x]; \
+	if (!(0 <= x && x < COUNTOF(g_##NAME##_attr))) return "???"; \
+	return g_##NAME##_attr[x].name; \
 } \
 TYPE mlis_##NAME##_froms(const StrSlice ss) { \
-	for (int x=0; x<COUNTOF(g_##NAME##_str); ++x) \
-		if (!strsl_cmpz_id(ss, g_##NAME##_str[x])) \
+	for (int x=0; x<COUNTOF(g_##NAME##_attr); ++x) \
+		if (!strsl_cmpz_id(ss, g_##NAME##_attr[x].name)) \
 			return x; \
 	return (TYPE) DEFAULT; \
 } \
@@ -183,47 +183,57 @@ TYPE mlis_##NAME##_fromz(const char* str) { \
 	return mlis_##NAME##_froms(strsl_fromz(str)); \
 }
 
+#define IMPL_ENUM_FUNC_DESC(NAME, TYPE) \
+const char * mlis_##NAME##_desc(TYPE x) { \
+	if (!(0 <= x && x < COUNTOF(g_##NAME##_attr))) return "???"; \
+	return g_##NAME##_attr[x].desc; \
+} \
+
 #define IMPL_ENUM_FUNC_KV(NAME, TYPE, DEFAULT) \
 const char * mlis_##NAME##_str(TYPE id) { \
-	for (int i=0; i<COUNTOF(g_##NAME##_kv); ++i) \
-		if ((int)id == g_##NAME##_kv[i].v) \
-			return g_##NAME##_kv[i].k; \
+	for (int i=0; i<COUNTOF(g_##NAME##_attr); ++i) \
+		if ((int)id == g_##NAME##_attr[i].id) \
+			return g_##NAME##_attr[i].name; \
 	return "???"; \
 } \
 TYPE mlis_##NAME##_froms(const StrSlice ss) { \
-	for (int i=0; i<COUNTOF(g_##NAME##_kv); ++i) \
-		if (!strsl_cmpz_id(ss, g_##NAME##_kv[i].k)) \
-			return g_##NAME##_kv[i].v; \
+	for (int i=0; i<COUNTOF(g_##NAME##_attr); ++i) \
+		if (!strsl_cmpz_id(ss, g_##NAME##_attr[i].name)) \
+			return g_##NAME##_attr[i].id; \
 	return (TYPE) DEFAULT; \
 } \
 TYPE mlis_##NAME##_fromz(const char* str) { \
 	return mlis_##NAME##_froms(strsl_fromz(str)); \
 }
 
-const char * g_stage_str[] = {
-	"idle",
-	"cond_encode",
-	"image_encode",
-	"image_decode",
-	"denoise",
+static const struct { const char *name, *desc; }
+g_stage_attr[] = {
+	{ "idle", "Idle" },
+	{ "cond_encode", "Conditioning encoding" },
+	{ "image_encode", "Image encoding" },
+	{ "image_decode", "Image decoding" },
+	{ "denoise", "Denoising" },
 };
 
-const char * g_method_str[] = {
-	"none",
-	"euler",
-	"heun",
-	"taylor3",
-	"dpmpp2m",
-	"dpmpp2s",
+static const struct { const char *name; }
+g_method_attr[MLIS_METHOD__LAST+1] = {
+	{ "none" },
+	{ "euler" },
+	{ "heun" },
+	{ "taylor3" },
+	{ "dpmpp2m" },
+	{ "dpmpp2s" },
 };
 
-const char * g_sched_str[] = {
-	"none",
-	"uniform",
-	"karras",
+static const struct { const char *name; }
+g_sched_attr[MLIS_SCHED__LAST+1] = {
+	{ "none" },
+	{ "uniform" },
+	{ "karras" },
 };
 
-struct { const char *k; int v; } g_loglvl_kv[] = {
+static const struct { const char *name; int id; }
+g_loglvl_attr[] = {
 	{ "none", MLIS_LOGLVL_NONE },
 	{ "error", MLIS_LOGLVL_ERROR },
 	{ "warning", MLIS_LOGLVL_WARNING },
@@ -233,45 +243,58 @@ struct { const char *k; int v; } g_loglvl_kv[] = {
 	{ "max", MLIS_LOGLVL_MAX },
 };
 
-const char * g_option_str[MLIS_OPT__LAST+1] = {
-	"none",
-	"backend",
-	"model",
-	"tae",
-	"lora_dir",
-	"lora",
-	"lora_clear",
-	"prompt",
-	"nprompt",
-	"image_dim",
-	"batch_size",
-	"clip_skip",
-	"cfg_scale",
-	"method",
-	"scheduler",
-	"steps",
-	"f_t_ini",
-	"f_t_end",
-	"s_noise",
-	"s_ancestral",
-	"image",
-	"image_mask",
-	"no_decode",
-	"tensor_use_flags",
-	"seed",
-	"vae_tile",
-	"unet_split",
-	"threads",
-	"dump_flags",
-	"aux_dir",
-	"callback",
-	"error_handler",
-	"log_level",
+static const struct { const char *name, *desc; }
+g_model_type_attr[MLIS_MODEL_TYPE__LAST+1] = {
+	{ "none", "None" },
+	{ "sd1", "Stable Diffusion 1.x" },
+	{ "sd2", "Stable Diffusion 2.x" },
+	{ "sdxl", "Stable Diffusion XL" },
+};
+
+static const struct { const char *name; }
+g_option_attr[MLIS_OPT__LAST+1] = {
+	{ "none" },
+	{ "backend" },
+	{ "model" },
+	{ "tae" },
+	{ "lora_dir" },
+	{ "lora" },
+	{ "lora_clear" },
+	{ "prompt" },
+	{ "nprompt" },
+	{ "image_dim" },
+	{ "batch_size" },
+	{ "clip_skip" },
+	{ "cfg_scale" },
+	{ "method" },
+	{ "scheduler" },
+	{ "steps" },
+	{ "f_t_ini" },
+	{ "f_t_end" },
+	{ "s_noise" },
+	{ "s_ancestral" },
+	{ "image" },
+	{ "image_mask" },
+	{ "no_decode" },
+	{ "tensor_use_flags" },
+	{ "seed" },
+	{ "vae_tile" },
+	{ "unet_split" },
+	{ "threads" },
+	{ "dump_flags" },
+	{ "aux_dir" },
+	{ "callback" },
+	{ "error_handler" },
+	{ "log_level" },
+	{ "model_type" },
 };
 
 IMPL_ENUM_FUNC(stage, MLIS_Stage, -1)
+IMPL_ENUM_FUNC_DESC(stage, MLIS_Stage)
 IMPL_ENUM_FUNC(method, MLIS_Method, -1)
 IMPL_ENUM_FUNC(sched, MLIS_Scheduler, -1)
+IMPL_ENUM_FUNC(model_type, MLIS_ModelType, -1)
+IMPL_ENUM_FUNC_DESC(model_type, MLIS_ModelType)
 IMPL_ENUM_FUNC(option, MLIS_Option, -1)
 IMPL_ENUM_FUNC_KV(loglvl, MLIS_LogLvl, -1)
 
@@ -289,8 +312,6 @@ typedef struct MLIS_Ctx {
 	const VaeParams *vae_p;
 	const ClipParams *clip_p, *clip2_p;
 	const UnetParams *unet_p;
-
-	DynStr path_bin;
 
 	// Active loras
 	struct MLIS_LoraCfg {
@@ -314,6 +335,9 @@ typedef struct MLIS_Ctx {
 				cond, label,
 				ncond, nlabel,
 				t_tmp[4];
+
+	// Tokens vector
+	int32_t *tokens;  //vector
 	
 	// Image for mlis_image_get
 	MLIS_Image imgex;
@@ -358,6 +382,8 @@ typedef struct MLIS_Ctx {
 		
 		// Negative prompt. Used only if cfg_scale > 1.
 		DynStr nprompt;
+
+		MLIS_ModelType model_type;
 	
 		int			width,      // Image width in pixels
 					height,     // Image height in pixels
@@ -373,15 +399,6 @@ typedef struct MLIS_Ctx {
 
 		// Tensor use flags
 		int tuflags;  //MLIS_TUF_*
-		
-		// Sampler options
-		//MLIS_Method		method;
-		//MLIS_Scheduler	sched;
-		//int				n_step;   // Number of steps
-		//float			f_t_ini,  // 1 for txt2img, <1 for img2img
-		//				f_t_end,  // Should be zero
-		//				s_noise,
-		//				s_ancestral;  // 1 for ancestral methods
 	} c;
 
 	// Used to validated the context
@@ -398,6 +415,7 @@ enum MLIS_ConfigFlag {
 	// Do not decode the latent image after generation
 	MLIS_CF_NO_DECODE		= 4,
 	//MLIS_CF_PROMPT_NO_PROC
+	MLIS_CF_MODEL_TYPE_FIXED = 8,
 };
 
 enum MLIS_DumpFlag {
@@ -469,7 +487,7 @@ void mlis_free(MLIS_Ctx* S)
 	dstr_free(S->c.path_lora_dir);
 	dstr_free(S->c.prompt);
 	dstr_free(S->c.nprompt);
-	dstr_free(S->path_bin);
+	vec_free(S->tokens);
 
 	vec_free(S->backend_info.devs);
 
@@ -746,11 +764,6 @@ int mlis_file_find(MLIS_Ctx* S, const char* name, DynStr* out)
 		if (file_exists(*out)) goto end;
 	}
 	
-	if (!dstr_empty(S->path_bin)) {
-		dstr_printf(*out, "%s/%s", S->path_bin, name);
-		if (file_exists(*out)) goto end;
-	}
-	
 	dstr_printf(*out, "/usr/share/mlimgsynth/%s", name);
 	if (file_exists(*out)) goto end;
 	
@@ -760,6 +773,57 @@ int mlis_file_find(MLIS_Ctx* S, const char* name, DynStr* out)
 	//TODO: fs_dir_get, windows
 	//TODO: environmental variable
 	ERROR_LOG(MLIS_E_FILE_NOT_FOUND, "file '%s' could not be found", name);
+
+end:
+	return R;
+}
+
+static
+int mlis_model_type_set(MLIS_Ctx* S, MLIS_ModelType mt)
+{
+	int R=1;
+
+	switch (mt) {
+	case MLIS_MODEL_TYPE_NONE:
+		S->tae_p = NULL;
+		S->vae_p = NULL;
+		S->clip_p = NULL;
+		S->unet_p = NULL;
+		break;
+	case MLIS_MODEL_TYPE_SD1:
+		S->tae_p = &g_sdtae_sd1;
+		S->vae_p = &g_vae_sd1;
+		S->clip_p = &g_clip_vit_l_14;
+		S->unet_p = &g_unet_sd1;
+		IFNPOSSET(S->c.width, 512);
+		IFNPOSSET(S->c.height, S->c.width);
+		IFNPOSSET(S->c.clip_skip, 1);
+		break;
+	case MLIS_MODEL_TYPE_SD2:
+		S->tae_p = &g_sdtae_sd1;
+		S->vae_p = &g_vae_sd1;
+		S->clip_p = &g_clip_vit_h_14;
+		S->unet_p = &g_unet_sd2;
+		IFNPOSSET(S->c.width, 768);
+		IFNPOSSET(S->c.height, S->c.width);
+		IFNPOSSET(S->c.clip_skip, 2);
+		break;
+	case MLIS_MODEL_TYPE_SDXL:
+		S->tae_p = &g_sdtae_sd1;
+		S->vae_p = &g_vae_sdxl;
+		S->clip_p = &g_clip_vit_l_14;
+		S->clip2_p = &g_clip_vit_bigg_14;
+		S->unet_p = &g_unet_sdxl;
+		IFNPOSSET(S->c.width, 1024);
+		IFNPOSSET(S->c.height, S->c.width);
+		IFNPOSSET(S->c.clip_skip, 2);  //TODO: what if the model type is changed?
+		break;
+	default:
+		ERROR_LOG(MLIS_E_OPT_VALUE, "invalid model type %d", mt);
+	}
+
+	S->c.model_type = mt;
+	ccFLAG_SET(S->c.flags, MLIS_CF_MODEL_TYPE_FIXED, mt > 0);
 
 end:
 	return R;
@@ -929,6 +993,36 @@ end:
 error_value:
 	ERROR_LOG(MLIS_E_OPT_VALUE, "invalid argument '%.*s' for option '%s'",
 		(int)arg.s, arg.b, mlis_option_str(id));
+}
+
+int mlis_option_get(MLIS_Ctx* S, MLIS_Option id, ...)
+{
+	ERROR_HANDLE_BEGIN
+	va_list ap;
+	va_start(ap, id);
+
+#define OPTION(NAME) \
+	else if (id == MLIS_OPT_##NAME)
+
+// Macros to get and check arguments
+#define ARG_C(VAR, TYPE) \
+	TYPE *pstr = va_arg(ap, TYPE*); \
+	if (pstr) *pstr = (VAR);
+#define ARG_STR(VAR)  ARG_C(VAR, const char*)
+#define ARG_ENUM(VAR, STRF)  ARG_C(VAR, int) \
+
+	if (0) ;
+#include "mlimgsynth_options_get.c.h"
+	else
+		ERROR_LOG(MLIS_E_UNK_OPT, "unknown option %u", id);
+
+#undef ARG_ENUM
+#undef ARG_STR
+#undef ARG_C
+	
+end:
+	va_end(ap);
+	ERROR_HANDLE_END("mlis_option_get")
 }
 
 static
@@ -1152,54 +1246,33 @@ static
 int mlis_model_identify(MLIS_Ctx* S)
 {
 	int R=1;
-	const char *model_type=NULL;
+	MLIS_ModelType mt=0;
 	const TSTensorEntry *te=NULL;
 
 	if ((te = tstore_tensor_get(&S->tstore,
 		"unet.in.1.1.transf.0.attn2.k_proj.weight")))
 	{
 		if (te->shape[0] == 768) {
-			model_type = "Stable Diffusion 1.x";
-			S->tae_p = &g_sdtae_sd1;
-			S->vae_p = &g_vae_sd1;
-			S->clip_p = &g_clip_vit_l_14;
-			S->unet_p = &g_unet_sd1;
-			IFNPOSSET(S->c.width, 512);
-			IFNPOSSET(S->c.height, S->c.width);
-			IFNPOSSET(S->c.clip_skip, 1);
+			mt = MLIS_MODEL_TYPE_SD1;
 		}
 		else if (te->shape[0] == 1024) {
-			model_type = "Stable Diffusion 2.x";
-			S->tae_p = &g_sdtae_sd1;
-			S->vae_p = &g_vae_sd1;
-			S->clip_p = &g_clip_vit_h_14;
-			S->unet_p = &g_unet_sd2;
-			IFNPOSSET(S->c.width, 768);
-			IFNPOSSET(S->c.height, S->c.width);
-			IFNPOSSET(S->c.clip_skip, 2);
+			mt = MLIS_MODEL_TYPE_SD2;
 		}
 	}
 	else if ((te = tstore_tensor_get(&S->tstore,
 		"unet.in.4.1.transf.0.attn2.k_proj.weight")))
 	{
 		if (te->shape[0] == 2048) {
-			model_type = "Stable Diffusion XL";
-			S->tae_p = &g_sdtae_sd1;
-			S->vae_p = &g_vae_sdxl;
-			S->clip_p = &g_clip_vit_l_14;
-			S->clip2_p = &g_clip_vit_bigg_14;
-			S->unet_p = &g_unet_sdxl;
-			IFNPOSSET(S->c.width, 1024);
-			IFNPOSSET(S->c.height, S->c.width);
-			IFNPOSSET(S->c.clip_skip, 2);
+			mt = MLIS_MODEL_TYPE_SDXL;
 		}
 	}
 
-	if (!model_type)
-		ERROR_LOG(-1, "unknown model type");
+	if (!mt)
+		ERROR_LOG(-1, "could not detect the model type");
 	
-	log_info("Model type: %s", model_type);
-	//TODO: save model_type and allow to retrieve it
+	TRY( mlis_model_type_set(S, mt) );
+	
+	log_info("Model type: %s", mlis_model_type_desc(mt));
 	
 end:
 	return R;
@@ -1230,7 +1303,8 @@ int mlis_setup(MLIS_Ctx* S)
 		TRY( mlis_model_load(S) );
 
 		// Identify model type
-		TRY( mlis_model_identify(S) );
+		if (!(S->c.flags & MLIS_CF_MODEL_TYPE_FIXED))
+			TRY( mlis_model_identify(S) );
 		
 		S->rflags |= MLIS_READY_MODEL;
 	}
@@ -1322,30 +1396,22 @@ int mlis_mask_encode(MLIS_Ctx* S, const MLIS_Tensor* mask, MLIS_Tensor* lmask,
 	return 1;
 }
 
-int mlis_clip_text_encode(MLIS_Ctx* S, const char* prompt,
-	LocalTensor* embed, LocalTensor* feat, int model_idx, int flags)
+int mlis_text_tokenize(MLIS_Ctx* S, const char* text, const int32_t** ptokens,
+	MLIS_Model model)
 {
 	ERROR_HANDLE_BEGIN
 	DynStr tmps=NULL;
-	int32_t *tokens=NULL;
 
-	TRY( mlis_setup(S) );
+	if (!S->clip_p)
+		TRY( mlis_setup(S) );
+	//TODO: add a parameter to mlis_setup to indicate with model is needed?
 
 	// Select model
 	const ClipParams* clip_p=NULL;
-	const char* tprefix=NULL;
-	switch (model_idx) {
-	case 0:
-		clip_p = S->clip_p;
-		tprefix = "clip";
-		break;
-	case 1:
-		clip_p = S->clip2_p;
-		tprefix = "clip2";
-		break;
-	}
+	if (model == MLIS_MODEL_CLIP) clip_p = S->clip_p;
+	else if (model == MLIS_MODEL_CLIP2) clip_p = S->clip2_p;
 	if (!clip_p)
-		ERROR_LOG(MLIS_E_UNKNOWN, "invalid clip model no. %d", model_idx);
+		ERROR_LOG(MLIS_E_UNKNOWN, "invalid model for text tokenize: %d", model);
 
 	// Load vocabulary
 	if (!clip_good(&S->tokr)) {
@@ -1359,21 +1425,57 @@ int mlis_clip_text_encode(MLIS_Ctx* S, const char* prompt,
 			n_vocab, clip_p->n_vocab);
 
 	// Tokenize the prompt
-	IFFALSESET(prompt, "");
-	TRY( clip_tokr_tokenize(&S->tokr, prompt, &tokens) );
-	log_debug_vec("Tokens", tokens, i, 0, "%u %s",
-		tokens[i], clip_tokr_word_from_token(&S->tokr, tokens[i]) );
-	log_info("Prompt: %u tokens", vec_count(tokens));
+	IFFALSESET(text, "");
+	vec_resize(S->tokens, 0);
+	TRY( clip_tokr_tokenize(&S->tokr, text, &S->tokens) );
+	log_debug_vec("Tokens", S->tokens, i, 0, "%u %s",
+		S->tokens[i], clip_tokr_word_from_token(&S->tokr, S->tokens[i]) );
+	log_info("Prompt: %u tokens", vec_count(S->tokens));
+
+	if (ptokens)
+		*ptokens = S->tokens;
+	R = vec_count(S->tokens);
+
+end:
+	dstr_free(tmps);
+	ERROR_HANDLE_END("mlis_text_tokenize")
+}
+
+int mlis_clip_text_encode(MLIS_Ctx* S, const char* prompt,
+	LocalTensor* embed, LocalTensor* feat, MLIS_Model model, int flags)
+{
+	ERROR_HANDLE_BEGIN
+
+	TRY( mlis_setup(S) );
+	
+	// Select model
+	//TODO: make a function?
+	const ClipParams* clip_p=NULL;
+	const char *tprefix=NULL;
+	switch (model) {
+	case MLIS_MODEL_CLIP:
+		clip_p = S->clip_p;
+		tprefix = "clip";
+		break;
+	case MLIS_MODEL_CLIP2:
+		clip_p = S->clip2_p;
+		tprefix = "clip2";
+		break;
+	default:
+	}
+	if (!clip_p)
+		ERROR_LOG(MLIS_E_UNKNOWN, "invalid model for text tokenize: %d", model);
+
+	// Tokenize
+	TRY( mlis_text_tokenize(S, prompt, NULL, model) );
 
 	// Encode
 	bool b_norm = !(flags & MLIS_CTEF_NO_NORM);
 	S->ctx.tprefix = tprefix;
 	TRY( clip_text_encode(&S->ctx, clip_p,
-		tokens, embed, feat, S->c.clip_skip, b_norm) );
+		S->tokens, embed, feat, S->c.clip_skip, b_norm) );
 
 end:
-	vec_free(tokens);
-	dstr_free(tmps);
 	ERROR_HANDLE_END("mlis_clip_text_encode")
 }
 
@@ -1403,10 +1505,11 @@ int mlis_text_cond_encode(MLIS_Ctx* S, const char* prompt,
 	int cte_flags = 0;
 	if (!S->unet_p->clip_norm) cte_flags |= MLIS_CTEF_NO_NORM;
 
-	TRY( mlis_clip_text_encode(S, prompt, cond, NULL, 0, cte_flags) );
+	TRY( mlis_clip_text_encode(S, prompt, cond, NULL, MLIS_MODEL_CLIP, cte_flags) );
 
 	if (S->unet_p->cond_label) {
-		TRY( mlis_clip_text_encode(S, prompt, &tmpt, NULL, 1, cte_flags) );
+		TRY( mlis_clip_text_encode(S, prompt, &tmpt, NULL, MLIS_MODEL_CLIP2,
+			cte_flags) );
 
 		// Concatenate both text embeddings
 		assert( cond->n[1] == tmpt.n[1] &&
@@ -1425,7 +1528,7 @@ int mlis_text_cond_encode(MLIS_Ctx* S, const char* prompt,
 		}
 		
 		//TODO: no need to reprocess from scratch...
-		TRY( mlis_clip_text_encode(S, prompt, NULL, label, 1, 0) );
+		TRY( mlis_clip_text_encode(S, prompt, NULL, label, MLIS_MODEL_CLIP2, 0) );
 
 		// Complete label embedding
 		assert( label->n[0]==n_emb2 &&

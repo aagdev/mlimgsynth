@@ -1,7 +1,7 @@
 /* Copyright 2024, Alejandro A. García <aag@zorzal.net>
  * SPDX-License-Identifier: MIT
  *
- * mlimgsynth library options implementation.
+ * mlimgsynth library option_set implementation.
  */
 OPTION( BACKEND ) {
 	ARG_STR(name  , 0, 65535)
@@ -20,6 +20,10 @@ OPTION( TAE ) {
 	dstr_copy(S->c.path_tae, path.s, path.b);
 	bool en = !dstr_empty(S->c.path_tae);
 	ccFLAG_SET(S->c.flags, MLIS_CF_USE_TAE, en);
+}
+OPTION( MODEL_TYPE ) {
+	ARG_ENUM(id, mlis_model_type_froms)
+	TRY( mlis_model_type_set(S, id) );
 }
 OPTION( AUX_DIR ) {
 	ARG_STR_NO_PARSE(path, 0, 65535)

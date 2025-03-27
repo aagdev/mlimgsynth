@@ -44,7 +44,7 @@ Execute without any arguments to see a list of all the supported options.
 
 To start from an initial image (img2img) add the options `-i IMAGE.png` and `--f-t-ini 0.7`. The second option controls the strength by changing the initial time in the denoising process, you may try any value between 0 (no changes) and 1. 
 
-If the image has an alpha channel (transparency), it is used as a mask for inpainting.
+If the image has an alpha channel (transparency), it is used as a mask for inpainting. You can modify the alpha channel of an image using an editor like GIMP (remember to tick the option "Save color values from transparent pixels" when saving).
 
 ### Lora's
 
@@ -56,7 +56,7 @@ To accelerate and reduce the memory usage during the image decoding, you may use
 
 ## Library
 
-All the important fuctionally is a library (libmlimgsynth) that you can use from your own programs. There are example of usage for C (`src/demo_mlimgsynth.c`) and for python (`python/mlimgsynth.py` and `python/guessing_game.py`).
+All the important fuctionally is a library (libmlimgsynth) that you can use from your own programs. There are examples for C (`src/demo_mlimgsynth.c`) and for python (`python/mlimgsynth.py` and `python/guessing_game.py`).
 
 ## Future plans
 
