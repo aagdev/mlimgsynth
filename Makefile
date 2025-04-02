@@ -87,6 +87,7 @@ test_rng: $(objs_base) rng_philox.o test_rng.o
 tstore-util: $(objs_base) $(objs_tstore) main_tstore_util.o
 
 libmlimgsynth: $(objs_base) $(objs_tstore) rng_philox.o localtensor.o \
+	unicode.o unicode_data.o \
 	ggml_extend.o mlblock.o mlblock_nn.o tae.o vae.o clip.o unet.o lora.o \
 	solvers.o sampling.o tensor_name_conv.o mlimgsynth.o
 

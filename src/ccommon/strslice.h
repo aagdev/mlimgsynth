@@ -47,6 +47,9 @@ static inline
 const char * strsl_end(const StrSlice ss)
 	{ return ss.b + ss.s; }
 
+#define strsl_for(S, V, I) \
+	for (const char *V=strsl_begin(S)+(I), *V##end_=strsl_end(S); V<V##end_; ++V)
+
 // Unsafe slice
 static inline
 StrSlice strsl_slice_u(const StrSlice ss, size_t b, size_t e)
@@ -60,15 +63,17 @@ int strsl_cmp(const StrSlice s1, const StrSlice s2)
 	const char *c1=s1.b, *e1=c1+s1.s,
 			   *c2=s2.b, *e2=c2+s2.s;
 	do {
+		int v1 = (uint8_t)*c1;
+		int v2 = (uint8_t)*c2;
 		if (!(c1 < e1)) {
 			if (!(c2 < e2))
 				return 0;
 			else
-				return - *c2;
+				return -v2;
 		} else if (!(c2 < e2))
-			return *c1;
+			return v1;
 
-		int d = *c1 - *c2;
+		int d = v1 - v2;
 		if (d) return d;
 		
 		c1++;

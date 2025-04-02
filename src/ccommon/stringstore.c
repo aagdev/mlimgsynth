@@ -15,7 +15,8 @@ void strsto_free(StringStore* S)
 bool strsto_iidx_find(const StringStore* S, const StrSlice key, size_t* idx)
 {
 	bool found;
-	BISECT_RIGHT(found, *idx, 0, vec_count(S->idx), strsl_cmp(S->s[S->idx[i_]], key) );
+	BISECT_RIGHT(found, *idx, 0, vec_count(S->idx),
+		strsl_cmp(S->s[S->idx[i_]], key) );
 	return found;
 }
 

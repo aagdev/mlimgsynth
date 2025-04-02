@@ -58,8 +58,8 @@ void gen() {
 #pragma GCC visibility push(default)
 #endif
 
-#define MLIS_VERSION  0x000400
-#define MLIS_VERSION_STR  "0.4.0"
+#define MLIS_VERSION  0x000401
+#define MLIS_VERSION_STR  "0.4.1"
 
 /* Enumerations */
 
@@ -67,7 +67,7 @@ void gen() {
  */
 typedef enum MLIS_ErrorCode {
 	MLIS_E_UNKNOWN			= -1,
-	MLIS_E_VERSION			= -2,
+	MLIS_E_VERSION			= -2,  //no used
 	MLIS_E_UNK_OPT			= -3,
 	MLIS_E_OPT_VALUE		= -4,
 	MLIS_E_PROMPT_OPT		= -5,

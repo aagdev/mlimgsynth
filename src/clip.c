@@ -1,10 +1,14 @@
-/* Copyright 2024, Alejandro A. García <aag@zorzal.net>
+/* Copyright 2024-2025, Alejandro A. García <aag@zorzal.net>
  * SPDX-License-Identifier: MIT
  */
 #include "clip.h"
 #include "ccommon/ccommon.h"
+#include "ccommon/bisect.h"
 #include "ccommon/stream.h"
 #include "ccommon/logging.h"
+#include "ccommon/unicode.h"
+#include "ccommon/unicode_data.h"
+#include "str_match_util.h"
 #include "ggml_extend.h"
 #include "mlblock_nn.h"
 
@@ -52,180 +56,265 @@ const ClipParams g_clip_vit_bigg_14 = {
 	.tok_pad	= 0,
 };
 
-void clip_tokr_free(ClipTokenizer* S)
+/* Tokenizer
+ * ref: https://github.com/openai/CLIP : clip/simple_tokenizer.py
+ */
+
+const
+struct BpeMerge {
+	int32_t left, right;
+} g_clip_merges[] = {
+#include "clip_merges.c.h"
+};
+
+int32_t g_clip_merges_index[COUNTOF(g_clip_merges)] = {-1};
+
+static inline
+int merge_cmp(const struct BpeMerge* A, const struct BpeMerge* B)
 {
-	strsto_free(&S->vocab);
+	int64_t a = (((int64_t)A->left) << 32) | (int64_t)A->right;
+	int64_t b = (((int64_t)B->left) << 32) | (int64_t)B->right;
+	return ccSIGN(a - b);
+}	
+
+int32_t clip_tokr_merge_get(int32_t left, int32_t right)
+{
+	if (g_clip_merges_index[0] == -1) {
+		// Initialize sorted index
+		for (unsigned i=0; i<COUNTOF(g_clip_merges); ++i) {
+			BISECT_RIGHT_DECL(found, idx, 0, i,
+				merge_cmp(&g_clip_merges[g_clip_merges_index[i_]], 
+					&g_clip_merges[i]) )
+			
+			assert( !found );
+			memmove(g_clip_merges_index+idx+1, g_clip_merges_index+idx,
+				(i - idx) * sizeof(*g_clip_merges_index));
+			g_clip_merges_index[idx] = i;
+		}		
+	}
+
+	// Search
+	BISECT_RIGHT_DECL(found, idx, 0, COUNTOF(g_clip_merges_index),
+		merge_cmp(&g_clip_merges[g_clip_merges_index[i_]],
+			&(struct BpeMerge){left, right}) )
+
+	return found ? g_clip_merges_index[idx]+512 : 0x7fffffff;
 }
 
-int clip_tokr_vocab_load(ClipTokenizer* S, const char* path)
+int32_t clip_tokr_token_to_merge(int32_t token, int32_t* right)
 {
-	int R=1;
-	Stream stm={0};
-	TRY( stream_open_file(&stm, path, SOF_READ) );
-	
-	const char *end, *cur;
-	while ((cur = stream_read_buffer(&stm, &end)) < end) {
-		bool eof = stream_end_is(&stm);
+	if (!(512 <= token && token < 512+COUNTOF(g_clip_merges)))
+		return -1;
+	int32_t merge = token - 512;
+	*right = g_clip_merges[merge].right;
+	return g_clip_merges[merge].left;
+}
 
-		// Read one string per line and stores it in a string-position bi-map.
-		while (1) {
-			const char *beg=cur;
-			while (cur<end && *cur != '\n') cur++;
-			if (beg == cur) break;  //empty
-			if (cur == end && !eof) { cur=beg; break; }
-			TRY( strsto_add(&S->vocab, strsl_fromr(beg, cur)) );
-			if (cur == end) break;
-			cur++;
+/* Given a byte from an utf8-encoded string, returns its token in the vocabulary.
+ * Tokens 0 to 255 of CLIP's vocabulary are used for this.
+ * Tokens 256 to 512 are the same, but with the end of word indicator.
+ */
+int clip_tokr_byte_to_token(char byte)
+{
+	int b = (uint8_t)byte;
+	if      (b <=  32) b = b + 188;
+	else if (b <= 126) b = b - 33;
+	else if (b <= 160) b = b + 94;
+	else if (b <= 172) b = b - 67;
+	else if (b == 173) b = 255;
+	else               b = b - 68;
+	assert( 0 <= b && b <= 255 );
+	return b;
+}
+
+int clip_tokr_token_to_byte(int token)
+{
+	if      (token <=  93) token += 33;
+	else if (token <= 105) token += 67;
+	else if (token <= 187) token += 68;
+	else if (token <= 220) token -= 188;
+	else if (token <= 254) token -= 94;
+	else if (token == 255) token = 173;
+	else return -1;
+	assert( 0 <= token && token <= 255 );
+	return token;
+}
+
+/* Given a word, writes a list byte tokens to start bpe.
+ * Returns the number of tokens or negative in case of error.
+ */
+int clip_tokr_word_to_byte_tokens(const StrSlice word, size_t tokens_max,
+	int32_t* tokens)
+{
+	char buf[8];
+	size_t count=0;
+	const char *cur = strsl_begin(word), *end = strsl_end(word);
+	while (cur < end) {
+		uint32_t cp = utf8_decode_next(&cur, end);
+		cp = unicode_lower(cp);  // Lower case
+		char *e = utf8_encode_next(buf, cp);
+		for (char *c=buf; c<e; ++c) {
+			if (count == tokens_max) {
+				log_error("word too long (%d)", (int)strsl_len(word));
+				return -1;
+			}
+			count++;
+			*tokens++ = clip_tokr_byte_to_token(*c);
 		}
-		stream_commit(&stm, cur);
-		if (eof) break;
 	}
-	log_debug("CLIP vocabulary size: %u", strsto_count(&S->vocab));
-
-end:
-	if (R<0) log_error("reading CLIP vocabulary from '%s'", path);
-	stream_close(&stm, 0);
-	return R;
+	return count;
 }
 
-const char* clip_tokr_word_from_token(const ClipTokenizer* S, int32_t i)
+/* Perform byte pair encoding (bpe) with merges.
+ */
+int clip_tokr_bpe_merges(const StrSlice word, size_t tokens_max, int32_t* tokens)
 {
-	static char tmps[32];
-	StrSlice sl = strsto_get(&S->vocab, i);
-	// Remove space separating the two elements
-	const char *sep=sl.b, *end=sl.b+sl.s;
-	while (sep<end && *sep != ' ') sep++;
-	memcpy(tmps, sl.b, sep-sl.b);
-	if (sep+1<end) {
-		memcpy(tmps+(sep-sl.b), sep+1, end-sep-1);
-		tmps[end-sl.b-1] = 0;
-	} else {
-		tmps[sl.s] = 0;
+	int count;
+	
+	// Word to byte tokens
+	TRYR( count = clip_tokr_word_to_byte_tokens(word, tokens_max, tokens) );
+	if (count == 0) return 0;  // Empty word
+	tokens[count-1] += 256;  // Mark last token as end-of-word
+
+	// Recursively merge tokens
+	while (count > 1) {
+		//if (log_line_begin(LOG_LVL_DEBUG)){
+		//	for (int i=0; i<count; ++i)
+		//		log_line_strf(" %d '%s'", tokens[i],
+		//			clip_token_str(&g_clip_vit_l_14, tokens[i]) );
+		//	log_line_end();
+		//}
+		// Find best merge (smallest token)
+		int32_t best_tok = 0x7fffffff;
+		int best_pos = 0;
+		for (int i=1; i<count; ++i) {
+			int32_t tok = clip_tokr_merge_get(tokens[i-1], tokens[i]);
+			assert( tok >= 512 );
+			if (tok < best_tok) {
+				best_tok = tok;
+				best_pos = i;
+			}
+		}
+		if (best_tok == 0x7fffffff)  // No merge found
+			break;
+		// Merge tokens
+		tokens[best_pos-1] = best_tok;
+		for (int i=best_pos+1; i<count; ++i) tokens[i-1] = tokens[i];
+		count--;
 	}
-	return tmps;
+
+	return count;
 }
 
-static inline
-bool chr_ascii_is(char c) {
-	return 32 <= c && c <= 126;
-}
-
-static inline
-bool chr_whitespace_is(char c) {
-	return c == ' ' || c == '\t' || c == '\r' || c == '\n';
-}
-
-static inline
-bool chr_letter_is(char c) {
-	return ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z');
-}
-
-static inline
-bool chr_digit_is(char c) {
-	return '0' <= c && c <= '9';
-}
-
-static inline
-bool chr_other_is(char c) {
-	return chr_ascii_is(c) &&
-		!chr_whitespace_is(c) && !chr_letter_is(c) && !chr_digit_is(c);
-}
-
-static inline
-void str_lower(DynStr str) {
-	dstr_for(str,i,0)
-		if ('A' <= str[i] && str[i] <= 'Z') str[i] += 'a' - 'A';
-}
-
-int clip_tokr_tokenize(ClipTokenizer* S, const char* cur, int32_t** pout)
+/* Get the next chunk of text according to CLIP tokenizer rules.
+ * Original regex (with IGNORECASE):
+ * <\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+
+ */
+StrSlice clip_tokr_word_split(StrSlice *pss)
 {
-	int R=1;
-	DynStr word=NULL, bigram=NULL;
-	const char *end = cur + strlen(cur);
+	const char *cur = strsl_begin(*pss),
+	           *end = strsl_end(*pss),
+			   *beg = cur;
+
+	// Skip whitespace
+	beg = cur = str_unicode_space_skip(cur, end);
+
+	// Match
+	int cat_in_progress = 0;
+	while (cur < end) {
+		const char *prev = cur;
+
+		// Match strings
+		int m = str_match_advance_multiple(&cur, end, true,
+			//"<|startoftext|>", "<|endoftext|>",  no use in practice
+			"'s", "'t", "'re", "'ve", "'m", "'ll", "'ve");
+		if (m >= 0) {
+			if (cat_in_progress) cur = prev;
+			break;
+		}
+
+		// Match codepoint categories
+		uint32_t cp = utf8_decode_next(&cur, end);
+		int cat = chr_ascii_space_is(cp) ? 'Z' : unicode_category_major(cp);
+		if (cat == 'Z') {  // Whitespace
+			cur = prev;
+			break;
+		}
+		if (cat != 'N' && cat != 'L') cat = 'P';
+		if (!cat_in_progress) cat_in_progress = cat;
+		else if (cat != cat_in_progress) {
+			cur = prev;
+			break;
+		}
+	}
+
+	*pss = strsl_fromr(cur, end);
+	return strsl_fromr(beg, cur);
+}
+
+int clip_tokenize(const ClipParams* P, StrSlice text, int32_t** pout)
+{
+	int R=1, count;
+
+	assert( P->n_vocab == COUNTOF(g_clip_merges)+512+2 );
+	
+	int pos = vec_count(*pout),
+	    max = pos + strsl_len(text);
+	vec_realloc(*pout, max);  // pre-alloc
 
 	while (1) {
-		while (cur<end && chr_whitespace_is(*cur)) cur++;
-		if (cur == end) break;
+		StrSlice word = clip_tokr_word_split(&text);
+		if (!strsl_len(word)) break;  //TODO: test "   "
+		//log_debug("word: '%.*s'", (int)strsl_len(word), strsl_begin(word));
 
-		// Get next word
-		const char *beg = cur++;
-		if (!chr_ascii_is(*beg))
-			ERROR_LOG(-1, "non-ascii character in prompt");
-		if (chr_letter_is(*beg)) {
-			while (cur<end && chr_letter_is(*cur)) cur++;
-		}
-		else if (chr_digit_is(*beg)) {
-			while (cur<end && chr_digit_is(*cur)) cur++;
-		}
-		else if (*beg == '\'') {
-			if (cur[0] == 's') cur++;
-			else if (cur[0] == 't') cur++;
-			else if (cur[0] == 'm') cur++;
-			else if (cur[0] == 'd') cur++;
-			else if (cur[0] == 'r' && cur[1] == 'e') cur+=2;
-			else if (cur[0] == 'v' && cur[1] == 'e') cur+=2;
-			else if (cur[0] == 'l' && cur[1] == 'l') cur+=2;
-			else goto other;
-		}
-		else {
-other:
-			while (cur<end && chr_other_is(*cur)) cur++;
-		}
-
-		size_t len = cur-beg;
-		dstr_copy(word, len, beg);
-		str_lower(word);
-		dstr_appendz(word, "</w>");
-		
-		// Encode list of n-grams with a list of separation positions
-		// "dog</w>" -> 0 1 2 7 = ["d", "o", "g</w>"]
-		uint8_t *breaks=vec_stack(uint8_t,32);
-		vec_resize(breaks,len+1);
-		vec_for(breaks,i,0) breaks[i] = i;
-		breaks[len] = vec_count(word);  //including </w>
-
-		// List of tokens found. Token = vocabulary position.
-		int32_t *tokens=vec_stack(int32_t,32);
-		vec_resize(tokens,len);
-		vec_for(tokens,i,0) {
-			unsigned i1=breaks[i], i2=breaks[i+1];
-			tokens[i] = strsto_find(&S->vocab, (StrSlice){word+i1, i2-i1});
-			assert( tokens[i] >= 0 );
-		}
-
-		// BPE (byte pair encoding)
-		unsigned nvocab = strsto_count(&S->vocab);
-		while (vec_count(tokens) >= 2) {
-			StringInt best_iv=nvocab;
-			unsigned best_ib=vec_count(breaks);
-			vec_for(breaks,ib,2) {
-				uint8_t i1=breaks[ib-2], i2=breaks[ib-1], i3=breaks[ib];
-				dstr_copy(bigram, i2-i1, word+i1);
-				dstr_push(bigram, ' ');
-				dstr_append(bigram, i3-i2, word+i2);
-				StringInt iv = strsto_find(&S->vocab, strsl_fromd(bigram));
-				//printf("bigram: %s %d\n", bigram, iv);
-				if (0 <= iv && iv < best_iv) { best_iv=iv; best_ib=ib; }
-			}
-			if (best_iv == nvocab) break;
-			vec_remove(breaks, best_ib-1, 1);
-			vec_remove(tokens, best_ib-2, 1);
-			tokens[best_ib-2] = best_iv;
-		}
-		//printf("wtokens:");
-		//vec_for(tokens,i,0)
-		//	printf(" %d '%s'", tokens[i], strsto_get(&S->vocab, tokens[i]).b);
-		//printf("\n");
-
-		vec_for(tokens,i,0) vec_push(*pout, tokens[i]);
+		TRY( count = clip_tokr_bpe_merges(word, max-pos, (*pout)+pos) );
+		pos += count;
+		vec_resize(*pout, pos);
 	}
 
 end:
 	if (R<0) log_error("CLIP tokenizer");
-	dstr_free(bigram);
-	dstr_free(word);
 	return R;
 }
+
+int clip_token_decode(const ClipParams* P, int32_t token,
+	size_t bufsz, char* buf)
+{
+	assert( P->n_vocab == COUNTOF(g_clip_merges)+512+2 );
+
+	if (token < 0) {
+		return -1;
+	} else if (token <= 256) {
+		if (bufsz < 1) return -1;
+		buf[0] = clip_tokr_token_to_byte(token);
+		return 1;
+	}
+	else if (token <= 511) {
+		if (bufsz < 2) return -1;
+		buf[0] = clip_tokr_token_to_byte(token - 256);
+		buf[1] = ' ';
+		return 2;
+	}
+	else {
+		int r1, r2;
+		int32_t right, left;
+		TRYR( left = clip_tokr_token_to_merge(token, &right) );
+		TRYR( r1 = clip_token_decode(P, left , bufsz, buf) );
+		TRYR( r2 = clip_token_decode(P, right, bufsz-r1, buf+r1) );
+		return r1 + r2;
+	}
+}
+
+const char* clip_token_str(const ClipParams* P, int32_t token)
+{
+	static char buffer[128];
+	int r = clip_token_decode(P, token, sizeof(buffer), buffer);
+	if (r < 0) return "<|INVALID|>";
+	buffer[r] = 0;
+	return buffer;
+}
+
+/* Model code */
 
 MLTensor* mlb_clip_embeddings(MLCtx* C, MLTensor* x, MLTensor* tw,
 	int d_embed, int n_vocab, int n_token)

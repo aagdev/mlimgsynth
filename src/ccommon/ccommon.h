@@ -1,4 +1,4 @@
-/* Copyright 2024, Alejandro A. García <aag@zorzal.net>
+/* Copyright 2024-2025, Alejandro A. García <aag@zorzal.net>
  * SPDX-License-Identifier: Zlib
  *
  * Common C code header
@@ -55,11 +55,12 @@
 	((VAR) = (CTRL) ? (VAR) | (FLAG) : (VAR) & ~(FLAG))
 	
 #define MEM_ZERO(D)				memset(&(D), 0, sizeof(D))
-#define MEM_COPY(D, S)			memcpy(&(D), &(S), sizeof(D))
 #define MEM_CMP(D,S)			memcmp(&(D), &(S), sizeof(D))
+#define MEM_COPY(D, S)			memcpy(&(D), &(S), sizeof(D))
 #define ARRAY_ZERO(D, C)		memset((D), 0, sizeof(*(D))*(C))
-#define ARRAY_COPY(D, S, C)		memcpy((D), (S), sizeof(*(D))*(C))
 #define ARRAY_CMP(D, S, C)		memcmp((D), (S), sizeof(*(D))*(C))
+#define ARRAY_COPY(D, S, C)		memcpy((D), (S), sizeof(*(D))*(C))
+#define ARRAY_MOVE(D, S, C)		memmove((D), (S), sizeof(*(D))*(C))
 
 #define ccUNUSED(x) (void)(x)
 	

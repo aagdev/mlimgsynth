@@ -1,4 +1,4 @@
-/* Copyright 2024, Alejandro A. García <aag@zorzal.net>
+/* Copyright 2024-2025, Alejandro A. García <aag@zorzal.net>
  * SPDX-License-Identifier: MIT
  *
  * CLIP text to embeddings encoder for conditioning in SD.
@@ -6,25 +6,7 @@
 #pragma once
 #include "mlblock.h"
 #include "localtensor.h"
-#include "ccommon/stringstore.h"
-
-typedef struct {
-	StringStore vocab;
-} ClipTokenizer;
-
-void clip_tokr_free(ClipTokenizer*);
-
-static inline
-bool clip_good(const ClipTokenizer* S) { return strsto_count(&S->vocab); }
-
-int clip_tokr_vocab_load(ClipTokenizer*, const char* path);
-
-const char* clip_tokr_word_from_token(const ClipTokenizer* S, int32_t i);
-
-/* Examples:
- * "A dog longjumps...": "a</w>" "dog</w>" "long" "jumps</w>" "...</w>"
- */
-int clip_tokr_tokenize(ClipTokenizer*, const char* text, int32_t** poutvec);
+#include "ccommon/strslice.h"
 
 typedef struct {
 	int n_vocab;
@@ -39,6 +21,24 @@ typedef struct {
 extern const ClipParams g_clip_vit_l_14;		//SD 1.x and SDXL
 extern const ClipParams g_clip_vit_h_14;		//SD 2.x
 extern const ClipParams g_clip_vit_bigg_14;		//SDXL
+
+/* Encode a text in to a list of tokens.
+ * Return the number of tokens put into <out>.
+ * <ptokvec> is a pointer to a vector of tokens where new tokens will be appended.
+ */
+int clip_tokenize(const ClipParams* P, StrSlice text, int32_t** ptokvec);
+
+/* Decode a token into an string (zero terminated).
+ * Returns the number of bytes written, or negative in case of error.
+ */
+int clip_token_decode(const ClipParams* P, int32_t token,
+	size_t bufsz, char* buf);
+
+/* Get the string corresponding to a token.
+ * For debuging purposes, uses an internal buffer.
+ * Returns "<|INVALID|>" if not found.
+ */
+const char* clip_token_str(const ClipParams* P, int32_t token);
 
 // In : vector of token ids [n_token]
 // Out: embeddings [d_embed, n_token]

@@ -46,6 +46,8 @@ MLIS_LOGLVL_INFO	= 30
 MLIS_LOGLVL_VERBOSE	= 40
 MLIS_LOGLVL_DEBUG	= 50
 MLIS_LOGLVL_MAX		= 255
+MLIS_LOGLVL__INCREASE = 0x100 | 10
+MLIS_LOGLVL__DECREASE = 0x200 | 10
 
 MLIS_TENSOR_IMAGE		= 1
 MLIS_TENSOR_MASK		= 2
@@ -62,6 +64,19 @@ MLIS_TUF_MASK			= 2
 MLIS_TUF_LATENT			= 4
 MLIS_TUF_LMASK			= 8
 MLIS_TUF_CONDITIONING	= 16
+
+MLIS_MODEL_TYPE_NONE	= 0
+MLIS_MODEL_TYPE_SD1		= 1
+MLIS_MODEL_TYPE_SD2		= 2
+MLIS_MODEL_TYPE_SDXL	= 3
+MLIS_MODEL_TYPE__LAST	= 3
+	
+MLIS_MODEL_NONE			= 0
+MLIS_MODEL_UNET			= 1
+MLIS_MODEL_VAE			= 2
+MLIS_MODEL_TAE			= 3
+MLIS_MODEL_CLIP			= 4
+MLIS_MODEL_CLIP2		= 5
 
 MLIS_OPT_NONE = 0
 MLIS_OPT_BACKEND = 1
@@ -96,7 +111,8 @@ MLIS_OPT_AUX_DIR = 29
 MLIS_OPT_CALLBACK = 30
 MLIS_OPT_ERROR_HANDLER = 31
 MLIS_OPT_LOG_LEVEL = 32
-MLIS_OPT__LAST = 32
+MLIS_OPT_MODEL_TYPE = 33
+MLIS_OPT__LAST = 33
 
 MLIS_CTEF_NO_NORM = 1
 
@@ -255,7 +271,8 @@ class MLImgSynth:
 			errstr = errstr.decode("utf8")
 		return errstr
 
-	def clip_text_encode(self, text, features=False, no_norm=True, model_idx=0):
+	def clip_text_encode(self, text, features=False, no_norm=True, 
+			model_idx=MLIS_MODEL_CLIP):
 		s_text = text.encode("utf8")
 		t_embed = mlis_lib.mlis_tensor_get(self._ctx, MLIS_TENSOR_TMP);
 		t_feat = None
@@ -289,10 +306,12 @@ if __name__ == '__main__':
 	mlis.option_set("cfg-scale", 7.0)
 	
 	## Compute similarity between two text prompts
-	#mlis.option_set("model", "models/sd_v2-1_768-nonema-pruned-fp16.safetensors")
-	#embed1, feat1 = mlis.clip_text_encode("a blue cat", features=True)
-	#print(len(embed1.data), embed1.n)
-	#print(len(feat1.data), feat1.n)
-	#embed2, feat2 = mlis.clip_text_encode("blue cat", features=True)
-	##print(feat1.data[:4], feat2.data[:4])
-	#print("Similarity: %.3f" % feat1.similarity(feat2))  #0.956
+	if 0:
+		mlis.option_set("model",
+			"models/sd_v2-1_768-nonema-pruned-fp16.safetensors")
+		embed1, feat1 = mlis.clip_text_encode("a blue cat", features=True)
+		print(len(embed1.data), embed1.n)
+		print(len(feat1.data), feat1.n)
+		embed2, feat2 = mlis.clip_text_encode("blue cat", features=True)
+		#print(feat1.data[:4], feat2.data[:4])
+		print("Similarity: %.3f" % feat1.similarity(feat2))  #0.956

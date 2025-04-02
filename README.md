@@ -60,7 +60,7 @@ All the important fuctionally is a library (libmlimgsynth) that you can use from
 
 ## Future plans
 
-- Complete prompt preprocessing to allow non-ascii characters and parse weighting (e.g. `a (large) dog`).
+- Complete prompt preprocessing to parse weights (e.g. `a (large) dog`).
 - Support for GGUF and quantized models.
 - API server and minimal web UI.
 - ControlNet.

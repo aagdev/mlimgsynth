@@ -304,7 +304,6 @@ typedef struct MLIS_Ctx {
 	MLCtx ctx;
 	TensorStore tstore;
 	Stream stm_model, stm_tae;
-	ClipTokenizer tokr;
 	DenoiseSampler sampler;  // Sampler options inside
 	StringStore ss;
 
@@ -437,6 +436,11 @@ enum MLIS_LoraFlag {
 
 MLIS_Ctx* mlis_ctx_create_i(int version)
 {
+	if (!(0x000400 <= version && version < 0x000500)) {
+		log_error("mlis incompatible version %06x", version);
+		return NULL;
+	}
+
 	if (!global_init_done) {
 		unet_params_init();
 	
@@ -505,7 +509,6 @@ void mlis_free(MLIS_Ctx* S)
 
 	dnsamp_free(&S->sampler);
 	mlctx_free(&S->ctx);
-	clip_tokr_free(&S->tokr);
 	stream_close(&S->stm_tae, 0);
 	tstore_free(&S->tstore);
 	stream_close(&S->stm_model, 0);
@@ -751,7 +754,7 @@ end:
 	return R;
 }
 
-static
+/*static
 int mlis_file_find(MLIS_Ctx* S, const char* name, DynStr* out)
 {
 	int R=1;
@@ -776,7 +779,7 @@ int mlis_file_find(MLIS_Ctx* S, const char* name, DynStr* out)
 
 end:
 	return R;
-}
+}*/
 
 static
 int mlis_model_type_set(MLIS_Ctx* S, MLIS_ModelType mt)
@@ -1413,23 +1416,12 @@ int mlis_text_tokenize(MLIS_Ctx* S, const char* text, const int32_t** ptokens,
 	if (!clip_p)
 		ERROR_LOG(MLIS_E_UNKNOWN, "invalid model for text tokenize: %d", model);
 
-	// Load vocabulary
-	if (!clip_good(&S->tokr)) {
-		TRY( mlis_file_find(S, "clip-vocab-merges.txt", &tmps) );
-		log_debug("Loading vocabulary from '%s'", tmps);
-		TRY( clip_tokr_vocab_load(&S->tokr, tmps) );
-	}	
-	unsigned n_vocab = strsto_count(&S->tokr.vocab);
-	if (n_vocab != clip_p->n_vocab)
-		ERROR_LOG(-1, "wrong vocabulary size: %u (read) != %u (expected)",
-			n_vocab, clip_p->n_vocab);
-
 	// Tokenize the prompt
 	IFFALSESET(text, "");
 	vec_resize(S->tokens, 0);
-	TRY( clip_tokr_tokenize(&S->tokr, text, &S->tokens) );
-	log_debug_vec("Tokens", S->tokens, i, 0, "%u %s",
-		S->tokens[i], clip_tokr_word_from_token(&S->tokr, S->tokens[i]) );
+	TRY( clip_tokenize(clip_p, strsl_fromz(text), &S->tokens) );
+	log_debug_vec("Tokens", S->tokens, i, 0, "%d '%s'",
+		S->tokens[i], clip_token_str(clip_p, S->tokens[i]) );
 	log_info("Prompt: %u tokens", vec_count(S->tokens));
 
 	if (ptokens)
@@ -1535,7 +1527,7 @@ int mlis_text_cond_encode(MLIS_Ctx* S, const char* prompt,
 			label->n[1]==1 && label->n[2]==1 && label->n[3]==1 );
 		ltensor_resize(label, S->unet_p->ch_adm_in, 1, 1, 1);
 		float *ld = label->d + n_emb2;
-		unsigned w = S->c.width, h = S->c.height;
+		unsigned w = S->c.width, h = S->c.height;  //TODO: maybe different in img2img
 		// Original size
 		ld += sd_timestep_embedding(2, (float[]){h,w}, 256, 10000, ld);
 		// Crop top,left
