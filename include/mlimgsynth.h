@@ -332,8 +332,13 @@ typedef enum MLIS_Option {
 	// retrieve the detected type after mlis_setup is called.
 	// Arg: (MLIS_ModelType)
 	MLIS_OPT_MODEL_TYPE = 33,
+
+	// Weight data type. Uses GGML types (0: f32, 1: f16, 8: q8_0).
+	// With mlis_option_set_str, names can be used.
+	// Arg: ggml_type (int)
+	MLIS_OPT_WEIGHT_TYPE = 34,
 	
-	MLIS_OPT__LAST = 33,
+	MLIS_OPT__LAST = 34,
 } MLIS_Option;
 
 /* Structures */

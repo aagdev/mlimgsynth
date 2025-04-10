@@ -275,8 +275,12 @@ int tnconv_sd(StrSlice name, DynStr *out)
 {
 	int R=0;
 
+	// sd.cpp clip2 for sdxl
+	if (MATCH_REP("cond_stage_model.1.", "clip2.")) {
+		return tnconv_clip_1(name, out);
+	}
 	// Text encoding (clip)
-	if (MATCH_REP("cond_stage_model.", "clip.")) {
+	else if (MATCH_REP("cond_stage_model.", "clip.")) {
 		//sd1
 		if (MATCH("transformer.text_model.")) {
 			return tnconv_clip_1(name, out);

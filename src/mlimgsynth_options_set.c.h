@@ -156,6 +156,25 @@ OPTION( UNET_SPLIT ) {
 	ARG_BOOL(en)
 	ccFLAG_SET(S->c.flags, MLIS_CF_UNET_SPLIT, en);
 }
+OPTION( WEIGHT_TYPE ) {
+#ifdef ARG_IS_STR
+	int id = tstore_dtype_fromz(vcur);
+	id = tstore_dtype_to_ggml(id);
+	if (id >= 0) {
+		S->ctx.c.wtype = id;
+		S->c.flags |= MLIS_CF_WEIGHT_TYPE_SET;
+		goto done;
+	}
+#endif
+	ARG_INT(i, -1, GGML_TYPE_COUNT-1, 0)
+	if (i == -1) {  //unset
+		S->ctx.c.wtype = GGML_TYPE_F16;
+		S->c.flags &= ~MLIS_CF_WEIGHT_TYPE_SET;
+	} else {
+		S->ctx.c.wtype = i;	
+		S->c.flags |= MLIS_CF_WEIGHT_TYPE_SET;
+	}
+}
 OPTION( THREADS ) {
 	ARG_INT(i, 0, 65535, 0)
 	S->c.n_thread = i;

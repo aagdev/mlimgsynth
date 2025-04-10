@@ -187,6 +187,7 @@ int data_convert(int dtype, int stype, size_t n, void* dst, const void* src)
 #ifdef TENSORSTORE_USE_GGML
 	//TODO: one ggml_init is required for some of this to work
 	const TSDTypeAttr *dta = tstore_dtype_attr(dtype);
+	const TSDTypeAttr *sta = tstore_dtype_attr(stype);
 	if (dtype == TS_DTYPE_F32 && stype == TS_DTYPE_F16) {
 		ggml_fp16_to_fp32_row(src, dst, n);
 	}
@@ -210,12 +211,17 @@ int data_convert(int dtype, int stype, size_t n, void* dst, const void* src)
 		size_t r = ggml_quantize_chunk(dta->ggml, src, dst, 0, 1, n, NULL);
 		if (r == 0) return -1;
 	}
-	else if (dta->sz_d > 1 && stype == TS_DTYPE_F16) {
+	else if (dta->sz_d > 1 && stype == TS_DTYPE_F16) {  //quant
 		void *tmp = alloc_alloc(TENSORSTORE_ALLOCATOR, n*4);
 		ggml_fp16_to_fp32_row(src, tmp, n);
 		size_t r = ggml_quantize_chunk(dta->ggml, tmp, dst, 0, 1, n, NULL);
 		alloc_free(TENSORSTORE_ALLOCATOR, tmp);
 		if (r == 0) return -1;
+	}
+	else if (sta->sz_d > 1 && dtype == TS_DTYPE_F32) {  //dequant
+		const struct ggml_type_traits *ggml_sta = ggml_get_type_traits(sta->ggml);
+		if (ggml_sta->to_float == NULL) return -1;
+		ggml_sta->to_float(src, (float*)dst, n);
 	}
 #else
 	if (dtype == TS_DTYPE_F32 && stype == TS_DTYPE_F16) {

@@ -28,10 +28,10 @@ By default, the program is linked with `libpng` and `libjpeg` to support those f
 
 ## Usage
 
-First, download the weights of the model you wish to use. Right now, the only supported format is `safetensors`. To generate an image (txt2img) use:
+First, download the weights of the model you wish to use (safetensors and gguf formats supported). To generate an image (txt2img) use:
 
 ```shell
-./mlimgsynth generate -b Vulkan0 -m MODEL.safetensors --cfg-scale 7 --steps 20 --seed 42 -o output.png -p "a box on a table"
+./mlimgsynth generate -b Vulkan0 -m MODEL_PATH --cfg-scale 7 --steps 20 --seed 42 -o output.png -p "a box on a table"
 ```
 
 The option `-b` let's you select from the available backends. Use `Vulkan0` or `CUDA0` for GPU. By default `CPU` is used.
@@ -61,7 +61,6 @@ All the important fuctionally is a library (libmlimgsynth) that you can use from
 ## Future plans
 
 - Complete prompt preprocessing to parse weights (e.g. `a (large) dog`).
-- Support for GGUF and quantized models.
 - API server and minimal web UI.
 - ControlNet.
 - Maybe SDE sampling. The biggest hurdle is understanding what it is doing the `torchsde.BrownianTree` used in `k-diffusion`.

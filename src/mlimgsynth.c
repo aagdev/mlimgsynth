@@ -287,6 +287,7 @@ g_option_attr[MLIS_OPT__LAST+1] = {
 	{ "error_handler" },
 	{ "log_level" },
 	{ "model_type" },
+	{ "weight_type" },
 };
 
 IMPL_ENUM_FUNC(stage, MLIS_Stage, -1)
@@ -414,7 +415,8 @@ enum MLIS_ConfigFlag {
 	// Do not decode the latent image after generation
 	MLIS_CF_NO_DECODE		= 4,
 	//MLIS_CF_PROMPT_NO_PROC
-	MLIS_CF_MODEL_TYPE_FIXED = 8,
+	MLIS_CF_MODEL_TYPE_SET	= 8,
+	MLIS_CF_WEIGHT_TYPE_SET = 16
 };
 
 enum MLIS_DumpFlag {
@@ -826,7 +828,7 @@ int mlis_model_type_set(MLIS_Ctx* S, MLIS_ModelType mt)
 	}
 
 	S->c.model_type = mt;
-	ccFLAG_SET(S->c.flags, MLIS_CF_MODEL_TYPE_FIXED, mt > 0);
+	ccFLAG_SET(S->c.flags, MLIS_CF_MODEL_TYPE_SET, mt > 0);
 
 end:
 	return R;
@@ -1249,12 +1251,14 @@ static
 int mlis_model_identify(MLIS_Ctx* S)
 {
 	int R=1;
+	int ts_wtype=0;
 	MLIS_ModelType mt=0;
 	const TSTensorEntry *te=NULL;
 
 	if ((te = tstore_tensor_get(&S->tstore,
 		"unet.in.1.1.transf.0.attn2.k_proj.weight")))
 	{
+		ts_wtype = te->dtype;
 		if (te->shape[0] == 768) {
 			mt = MLIS_MODEL_TYPE_SD1;
 		}
@@ -1265,17 +1269,24 @@ int mlis_model_identify(MLIS_Ctx* S)
 	else if ((te = tstore_tensor_get(&S->tstore,
 		"unet.in.4.1.transf.0.attn2.k_proj.weight")))
 	{
+		ts_wtype = te->dtype;
 		if (te->shape[0] == 2048) {
 			mt = MLIS_MODEL_TYPE_SDXL;
 		}
 	}
-
-	if (!mt)
+	
+	if (mt)
+		TRY( mlis_model_type_set(S, mt) );
+	else if (!(S->c.flags & MLIS_CF_MODEL_TYPE_SET))
 		ERROR_LOG(-1, "could not detect the model type");
 	
-	TRY( mlis_model_type_set(S, mt) );
-	
-	log_info("Model type: %s", mlis_model_type_desc(mt));
+	log_info("Model type: %s", mlis_model_type_desc(S->c.model_type));
+
+	if (ts_wtype > 0 && !(S->c.flags & MLIS_CF_WEIGHT_TYPE_SET))
+		S->ctx.c.wtype = tstore_dtype_to_ggml(ts_wtype);
+
+	if (S->ctx.c.wtype != GGML_TYPE_F16 || log_level_check(LOG_LVL_INFO2))
+		log_info("Weight type: %s", ggml_type_name(S->ctx.c.wtype));
 	
 end:
 	return R;
@@ -1306,8 +1317,7 @@ int mlis_setup(MLIS_Ctx* S)
 		TRY( mlis_model_load(S) );
 
 		// Identify model type
-		if (!(S->c.flags & MLIS_CF_MODEL_TYPE_FIXED))
-			TRY( mlis_model_identify(S) );
+		TRY( mlis_model_identify(S) );
 		
 		S->rflags |= MLIS_READY_MODEL;
 	}
@@ -1407,7 +1417,7 @@ int mlis_text_tokenize(MLIS_Ctx* S, const char* text, const int32_t** ptokens,
 
 	if (!S->clip_p)
 		TRY( mlis_setup(S) );
-	//TODO: add a parameter to mlis_setup to indicate with model is needed?
+	//TODO: add a parameter to mlis_setup to indicate which model is needed?
 
 	// Select model
 	const ClipParams* clip_p=NULL;
