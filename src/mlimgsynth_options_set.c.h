@@ -42,12 +42,30 @@ OPTION( LORA_CLEAR ) {
 	mlis_cfg_loras_free(S);	
 }
 OPTION( PROMPT ) {
-	ARG_STR_NO_PARSE(prompt, 0, 65535)
-	mlis_cfg_prompt_set(S, prompt);
+	ARG_STR_NO_PARSE(text, 0, 65535)
+	dstr_copy(S->c.prompt_raw, text.s, text.b);
+	if (S->c.flags & MLIS_CF_NO_PROMPT_PARSE)
+		prompt_text_set_raw(&S->c.prompt, text);
+	else {
+		TRY( prompt_text_set_parse(&S->c.prompt, text) );
+		vec_forp(struct PromptTextLora, S->c.prompt.loras, p, 0)
+			TRY( mlis_cfg_lora_add(S, p->name, p->w, MLIS_LF_PROMPT) );
+	}
 }
 OPTION( NPROMPT ) {
-	ARG_STR_NO_PARSE(prompt, 0, 65535)
-	dstr_copy(S->c.nprompt, prompt.s, prompt.b);
+	ARG_STR_NO_PARSE(text, 0, 65535)
+	dstr_copy(S->c.nprompt_raw, text.s, text.b);
+	if (S->c.flags & MLIS_CF_NO_PROMPT_PARSE)
+		prompt_text_set_raw(&S->c.nprompt, text);
+	else {
+		TRY( prompt_text_set_parse(&S->c.nprompt, text) );
+		vec_forp(struct PromptTextLora, S->c.nprompt.loras, p, 0)
+			TRY( mlis_cfg_lora_add(S, p->name, p->w, MLIS_LF_PROMPT) );
+	}
+}
+OPTION( NO_PROMPT_PARSE ) {
+	ARG_BOOL(en)
+	ccFLAG_SET(S->c.flags, MLIS_CF_NO_PROMPT_PARSE, en);
 }
 OPTION( IMAGE_DIM ) {
 	ARG_INT(w, 0, 65535, 0)

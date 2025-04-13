@@ -436,8 +436,8 @@ MLTensor* mlb_clip_text_proj(MLCtx* C, MLTensor* x, int i_tok_end)
 	return x;
 }
 
-int clip_text_encode(MLCtx* C, const ClipParams* P,
-	const int32_t *tokvec, LocalTensor* embed, LocalTensor* feat,
+int clip_text_encode(MLCtx* C, const ClipParams* P, unsigned n_tok,
+	const int32_t *toks, LocalTensor* embed, LocalTensor* feat,
 	int clip_skip, bool norm)
 {
 	int R=1;
@@ -446,14 +446,13 @@ int clip_text_encode(MLCtx* C, const ClipParams* P,
 	if (feat) { clip_skip=-1; norm=true; }
 
 	// Prepare tokens
-	unsigned ntok = vec_count(tokvec);
-	if (ntok+2 > P->n_token)
+	if (n_tok+2 > P->n_token)
 		ERROR_LOG(-1, "prompt too long (max: %d)", P->n_token-2);
 	vec_resize(tokens, P->n_token);
 	tokens[0] = P->tok_start;
-	ARRAY_COPY(tokens+1, tokvec, ntok);
-	tokens[ntok+1] = P->tok_end;
-	vec_for(tokens,i,ntok+2) tokens[i] = P->tok_pad;
+	ARRAY_COPY(tokens+1, toks, n_tok);
+	tokens[n_tok+1] = P->tok_end;
+	vec_for(tokens,i,n_tok+2) tokens[i] = P->tok_pad;
 	
 	//log_debug_vec("Tokens", tokens, i, 0, "%u", tokens[i]);
 
@@ -465,7 +464,7 @@ int clip_text_encode(MLCtx* C, const ClipParams* P,
 
 	MLTensor *result=t_embed, *t_feat=NULL;
 	if (feat)
-		result = t_feat = mlb_clip_text_proj(C, t_embed, ntok+1);
+		result = t_feat = mlb_clip_text_proj(C, t_embed, n_tok+1);
 
 	mlctx_tensor_add(C, "text", result);
 	TRY( mlctx_prep(C) );

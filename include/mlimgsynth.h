@@ -70,7 +70,7 @@ typedef enum MLIS_ErrorCode {
 	MLIS_E_VERSION			= -2,  //no used
 	MLIS_E_UNK_OPT			= -3,
 	MLIS_E_OPT_VALUE		= -4,
-	MLIS_E_PROMPT_OPT		= -5,
+	MLIS_E_PROMPT_PARSE		= -5,
 	MLIS_E_FILE_NOT_FOUND	= -6,
 	MLIS_E_NAN				= -7,
 	MLIS_E_IMAGE			= -8,
@@ -157,16 +157,16 @@ typedef enum MLIS_ModelType {
 	MLIS_MODEL_TYPE__LAST	= 3,
 } MLIS_ModelType;
 
-/* Individual models used for each stage internally.
+/* Individual sub-models used in each stage internally.
  */
-typedef enum MLIS_Model {
-	MLIS_MODEL_NONE			= 0,
-	MLIS_MODEL_UNET			= 1,
-	MLIS_MODEL_VAE			= 2,
-	MLIS_MODEL_TAE			= 3,
-	MLIS_MODEL_CLIP			= 4,
-	MLIS_MODEL_CLIP2		= 5,
-} MLIS_Model;
+typedef enum MLIS_SubModel {
+	MLIS_SUBMODEL_NONE			= 0,
+	MLIS_SUBMODEL_UNET			= 1,
+	MLIS_SUBMODEL_VAE			= 2,
+	MLIS_SUBMODEL_TAE			= 3,
+	MLIS_SUBMODEL_CLIP			= 4,
+	MLIS_SUBMODEL_CLIP2		= 5,
+} MLIS_SubModel;
 
 /* Options.
  * Set with mlis_option_set.
@@ -337,8 +337,12 @@ typedef enum MLIS_Option {
 	// With mlis_option_set_str, names can be used.
 	// Arg: ggml_type (int)
 	MLIS_OPT_WEIGHT_TYPE = 34,
+
+	// Do not parse the prompt for attention emphasis and loras.
+	// Arg: true or false (int)
+	MLIS_OPT_NO_PROMPT_PARSE = 35,
 	
-	MLIS_OPT__LAST = 34,
+	MLIS_OPT__LAST = 35,
 } MLIS_Option;
 
 /* Structures */
@@ -380,7 +384,7 @@ typedef struct MLIS_ErrorInfo {
  */
 typedef struct MLIS_BackendInfo {
 	const char *name;  // Backend name to be used with the BACKEND option.
-	unsigned n_dev;    // Number of devices (i.g. GPU's)
+	unsigned n_dev;    // Number of devices (e.g. GPU's)
 	struct MLIS_BackendDeviceInfo {
 		const char *name,  // Short name
 		           *desc;  // Long description
@@ -521,8 +525,8 @@ int mlis_mask_encode(MLIS_Ctx* ctx, const MLIS_Tensor* mask, MLIS_Tensor* lmask,
  * Return the number of tokens or a negative value on error.
  * ptokens: will be set to point to an array with the tokens id's.
  */
-int mlis_text_tokenize(MLIS_Ctx* ctx, const char* text, const int32_t** ptokens,
-	MLIS_Model model);
+int mlis_text_tokenize(MLIS_Ctx* ctx, const char* text, int32_t** ptokens,
+	MLIS_SubModel model);
 
 /* Encode a text using a CLIP model.
  * Returns the embeddings and feature tensors (optional).
@@ -532,14 +536,14 @@ int mlis_text_tokenize(MLIS_Ctx* ctx, const char* text, const int32_t** ptokens,
  * similarity between to inputs.
  */
 int mlis_clip_text_encode(MLIS_Ctx* ctx, const char* text,
-	MLIS_Tensor* embed, MLIS_Tensor* feat, MLIS_Model model, int flags);
+	MLIS_Tensor* embed, MLIS_Tensor* feat, MLIS_SubModel model, int flags);
 
 enum {  // Flags for mlis_clip_text_encode
 	MLIS_CTEF_NO_NORM = 1,
 };
 
-int mlis_text_cond_encode(MLIS_Ctx* ctx, const char* text,
-	MLIS_Tensor* cond, MLIS_Tensor* label, int flags);
+//int mlis_text_cond_encode(MLIS_Ctx* ctx, const char* text,
+//	MLIS_Tensor* cond, MLIS_Tensor* label, int flags);
 
 /* Tensor operations.
  * For advanced uses only.

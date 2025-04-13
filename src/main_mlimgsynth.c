@@ -50,11 +50,12 @@ APP_NAME_VERSION "\n"
 "  --ilatent PATH       Input latent tensor.\n"
 "  --ilmask PATH        Input latent mask tensor.\n"
 "  -o --output PATH     Output image path.\n"
+"  --no-prompt-parse BOOL  Use prompt as raw text, do not parse emphasis or loras.\n"
 "\n"
 "Models and backend:\n"
 "  -m --model PATH      Model file.\n"
 "  --tae PATH           TAE model file. Enables TAE instead of VAE.\n"
-"  --lora PATH:MULT     Apply the LoRA from PATH with multiplier MULT.\n"
+"  --lora PATH,MULT     Apply the LoRA from PATH with multiplier MULT.\n"
 "         PATH          The multiplier is optional.\n"
 "                       This option can be used multiple times.\n"
 "  --lora-dir PATH      Directory to search for LoRA's found in the prompt as:\n"
@@ -65,10 +66,8 @@ APP_NAME_VERSION "\n"
 "  --unet-split BOOL    Split each unet steps to reduce memory usage.\n"
 "  --vae-tile INT       Encode and decode images using tiles of NxN pixels.\n"
 "                       Reduces memory usage. On doubt, try 512.\n"
-//"  --type NAME          Convert the weight to this tensor type.\n"
-//"                       Useful to quantize and reduce RAM usage (try q8_0).\n"
-"  --dump-model         Dumps model tensors and graphs.\n"
-"  --dump-lora          Dumps lora's tensors and graphs.\n"
+"  --weight-type NAME   Use this data type for some model weights.\n"
+"                       Useful to quantize and reduce memory usage (try q8_0).\n"
 "\n"
 "Sampling:\n"
 "  -S --seed INT        RNG seed.\n"
@@ -190,10 +189,11 @@ int mlis_cli_opt_set(void* userdata, const char* optname, const char* next_value
 
 	if (!optname) ;
 	IF_OPT("help") {
+		fwrite(help_string, 1, sizeof(help_string), stdout);
 		return ARG_PARSE_END;
 	}
 	IF_OPT("version") {
-		puts(version_string);
+		puts(APP_NAME_VERSION);
 		return ARG_PARSE_END;
 	}
 	IF_OPT("debug") {
@@ -569,7 +569,7 @@ int mlis_cli_clip_cmd(MLIS_CliOptions* opt, MLIS_Ctx* ctx)
 	
 	//TODO: not all models have the text projection tensor needef for the features
 	//      make feat optional. flag?
-	mlis_clip_text_encode(ctx, prompt, t_embed, t_feat, MLIS_MODEL_CLIP, 0);
+	mlis_clip_text_encode(ctx, prompt, t_embed, t_feat, MLIS_SUBMODEL_CLIP, 0);
 
 	//TODO: configurable paths
 	TRY( cli_tensor_save(t_embed, "clip-embed.tensor") );
@@ -588,8 +588,8 @@ int mlis_tokenize_cmd(MLIS_CliOptions* opt, MLIS_Ctx* ctx)
 	const char *prompt;
 	mlis_option_get(ctx, MLIS_OPT_PROMPT, &prompt);
 	
-	const int32_t *tokens;
-	int r = mlis_text_tokenize(ctx, prompt, &tokens, MLIS_MODEL_CLIP);
+	int32_t *tokens;
+	int r = mlis_text_tokenize(ctx, prompt, &tokens, MLIS_SUBMODEL_CLIP);
 
 	for (int i=0; i<r; ++i) {
 		if (i) stream_char_put(&out, ' ');
@@ -652,10 +652,7 @@ int main(int argc, char* argv[])
 	}
 
 	TRY( r = arg_parse(argc, argv, 1, short_options, mlis_cli_opt_set, &opt) );
-	if (!r) {
-		puts(help_string);
-		return 0;
-	}
+	if (!r) return 0;
 
 	mlis_option_set(ctx, MLIS_OPT_ERROR_HANDLER, error_handler, (void*)&opt);
 	mlis_option_set(ctx, MLIS_OPT_CALLBACK, progress_callback, (void*)&opt);

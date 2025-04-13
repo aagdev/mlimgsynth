@@ -49,6 +49,6 @@ MLTensor* mlb_clip_text(MLCtx* C, MLTensor* tokens, MLTensor* cust_emb,
 // Out: features vector [d_embed]
 MLTensor* mlb_clip_text_proj(MLCtx* C, MLTensor* embed, int i_tok_end);
 
-int clip_text_encode(MLCtx* C, const ClipParams* P,
-	const int32_t *tokvec, LocalTensor* embed, LocalTensor* feat,
+int clip_text_encode(MLCtx* C, const ClipParams* P, unsigned n_tok,
+	const int32_t *toks, LocalTensor* embed, LocalTensor* feat,
 	int clip_skip, bool norm);

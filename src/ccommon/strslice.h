@@ -47,8 +47,8 @@ static inline
 const char * strsl_end(const StrSlice ss)
 	{ return ss.b + ss.s; }
 
-#define strsl_for(S, V, I) \
-	for (const char *V=strsl_begin(S)+(I), *V##end_=strsl_end(S); V<V##end_; ++V)
+#define strsl_for(S, VC, VE, I) \
+	for (const char *VC=strsl_begin(S)+(I), *VE=strsl_end(S); VC<VE; ++VC)
 
 // Unsafe slice
 static inline

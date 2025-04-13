@@ -146,6 +146,12 @@
 #define vec_lastpd(P,I,D) \
 	(vec_count(P)>(I) ? &(P)[vec_count(P)-1-(I)] : (D))
 
+#define vec_lastp(P,I) \
+	vec_lastpd((P), (I), NULL)
+
+#define vec_end(P) \
+	((P) + vec_count(P))
+
 #define vec_for(P,V,I) \
 	for (dynbuf_uint V=(I), V##e_=vec_count(P); V<V##e_; ++V)
 
@@ -241,6 +247,9 @@ typedef char* DynStr;
 	dynbuf_reduce((void**)&(P), (C), sizeof(*(P)), 1)
 	
 // access
+#define dstr_end(P) \
+	((P) + dstr_count(P))
+
 #define dstr_for(P,V,I) \
 	for (dynbuf_uint V=(I), V##e_=dstr_count(P); V<V##e_; ++V)
 

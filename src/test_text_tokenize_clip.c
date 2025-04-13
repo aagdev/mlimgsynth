@@ -4,32 +4,7 @@
  * Test of the CLIP tokenizer.
  */
 #include "mlimgsynth.h"
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-
-#define error(...) do { \
-	printf("ERROR "); \
-	printf(__VA_ARGS__); \
-	printf("\n"); \
-	exit(1); \
-} while (0)
-
-#define log(...) do { \
-	printf(__VA_ARGS__); \
-	printf("\n"); \
-} while (0)
-
-#ifdef NDEBUG
-#define debug(...)
-#else
-#define debug(...) do { \
-	printf("DEBUG "); \
-	printf(__VA_ARGS__); \
-	printf("\n"); \
-} while (0)
-#endif
+#include "test_common.h"
 
 #define TEST(TEXT, ...) \
 	test(ctx, (TEXT), (const int32_t[]){__VA_ARGS__, -1})
@@ -42,8 +17,8 @@ void test(MLIS_Ctx* ctx, const char* text, const int32_t* expected)
 {
 	debug("%s", text);
 
-	const int32_t *tokens=NULL;
-	int r = mlis_text_tokenize(ctx, text, &tokens, MLIS_MODEL_CLIP);
+	int32_t *tokens=NULL;
+	int r = mlis_text_tokenize(ctx, text, &tokens, MLIS_SUBMODEL_CLIP);
 	if (r < 0)
 		error("mlis_tokenize('%s'): 0x%x", text, -r);
 	
@@ -90,7 +65,7 @@ int main(int argc, char* argv[])
 	// Long text. Split words.
 	TEST("Stable Diffusion is a deep learning, text-to-image model released in 2022 based on diffusion techniques.", 10492, 18656, 9364, 533, 320, 3383, 2378, 267, 4160, 268, 531, 268, 2867, 2863, 3410, 530, 17, 15, 17, 273, 2812, 525, 18656, 9364, 1782, 697, 7715, 269);
 
-	log("done");
+	log("TEST OK "__FILE__);
 	mlis_ctx_destroy(&ctx);
 	return 0;
 }

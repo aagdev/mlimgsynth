@@ -13,6 +13,7 @@ typedef struct LocalTensor MLIS_Tensor;
 #include "ccompute/tensorstore.h"
 
 #include "localtensor.h"
+#include "prompt_preproc.h"
 
 #include "mlblock.h"
 #include "tae.h"
@@ -288,6 +289,7 @@ g_option_attr[MLIS_OPT__LAST+1] = {
 	{ "log_level" },
 	{ "model_type" },
 	{ "weight_type" },
+	{ "no_prompt_parse" },
 };
 
 IMPL_ENUM_FUNC(stage, MLIS_Stage, -1)
@@ -338,6 +340,7 @@ typedef struct MLIS_Ctx {
 
 	// Tokens vector
 	int32_t *tokens;  //vector
+	float *tokens_weights;  //vector  //TODO: tensor?
 	
 	// Image for mlis_image_get
 	MLIS_Image imgex;
@@ -378,10 +381,12 @@ typedef struct MLIS_Ctx {
 		
 		// Textual conditioning for the image generation.
 		// Can also configure LoRA's putting anywhere "<lora:NAME:MULT>".
-		DynStr prompt;
+		DynStr prompt_raw;
+		PromptText prompt;
 		
 		// Negative prompt. Used only if cfg_scale > 1.
-		DynStr nprompt;
+		DynStr nprompt_raw;
+		PromptText nprompt;
 
 		MLIS_ModelType model_type;
 	
@@ -414,9 +419,11 @@ enum MLIS_ConfigFlag {
 	MLIS_CF_USE_TAE			= 2,
 	// Do not decode the latent image after generation
 	MLIS_CF_NO_DECODE		= 4,
+	// Do not parse the prompt to extract weighting or loras
+	MLIS_CF_NO_PROMPT_PARSE	= 8,
 	//MLIS_CF_PROMPT_NO_PROC
-	MLIS_CF_MODEL_TYPE_SET	= 8,
-	MLIS_CF_WEIGHT_TYPE_SET = 16
+	MLIS_CF_MODEL_TYPE_SET	= 0x1000,
+	MLIS_CF_WEIGHT_TYPE_SET = 0x2000,
 };
 
 enum MLIS_DumpFlag {
@@ -491,9 +498,12 @@ void mlis_free(MLIS_Ctx* S)
 	dstr_free(S->c.path_model);
 	dstr_free(S->c.path_tae);
 	dstr_free(S->c.path_lora_dir);
-	dstr_free(S->c.prompt);
-	dstr_free(S->c.nprompt);
+	dstr_free(S->c.prompt_raw);
+	dstr_free(S->c.nprompt_raw);
+	prompt_text_free(&S->c.prompt);
+	prompt_text_free(&S->c.nprompt);
 	vec_free(S->tokens);
+	vec_free(S->tokens_weights);
 
 	vec_free(S->backend_info.devs);
 
@@ -588,16 +598,6 @@ const MLIS_BackendInfo* mlis_backend_info_get(MLIS_Ctx* ctx, unsigned idx,
 }
 
 static
-void mlis_prompt_clear(MLIS_Ctx* S)
-{
-	dstr_resize(S->c.prompt, 0);
-	dstr_resize(S->c.nprompt, 0);
-	S->sampler.c.f_t_ini = 1;
-	S->sampler.c.f_t_end = 0;
-	S->c.tuflags = 0;
-}
-
-static
 void mlis_progress_reset(MLIS_Ctx* S)
 {
 	S->prg = (MLIS_Progress){
@@ -680,37 +680,6 @@ end:
 }
 
 static
-int mlis_cfg_prompt_option_parse(MLIS_Ctx* S, StrSlice ss)
-{
-	int R=1;
-	DynStr tmps=NULL;
-
-	if (strsl_prefix_trim(&ss, strsl_static("lora:")))
-	{
-		const char *sep=ss.b, *end=ss.b+ss.s;
-		while (sep < end && *sep != ':') sep++;  // Find multiplier option
-		
-		float mult=1;
-		if (*sep == ':') {  // Optional multiplier
-			char *tail=NULL;
-			mult = strtof(sep+1, &tail);
-			if (tail != end)
-				ERROR_LOG(MLIS_E_OPT_VALUE, "invalid lora multiplier");
-		}
-		
-		TRY( mlis_cfg_lora_add(S, strsl_fromr(ss.b, sep), mult, MLIS_LF_PROMPT) );
-	}
-	else {
-		ERROR_LOG(MLIS_E_PROMPT_OPT, "unknown prompt option '%.*s'",
-			(int)ss.s, ss.b);
-	}
-
-end:
-	dstr_free(tmps);
-	return R;
-}
-
-static
 void mlis_cfg_loras_prompt_remove(MLIS_Ctx* S)
 {
 	// Remove previous prompt lora's
@@ -725,35 +694,18 @@ void mlis_cfg_loras_prompt_remove(MLIS_Ctx* S)
 }
 
 static
-int mlis_cfg_prompt_set(MLIS_Ctx* S, const StrSlice ss)
+void mlis_prompt_clear(MLIS_Ctx* S)
 {
-	int R=1;
-	unsigned n_opt=0;
+	dstr_resize(S->c.prompt_raw, 0);
+	dstr_resize(S->c.nprompt_raw, 0);
+	prompt_text_clear(&S->c.prompt);
+	prompt_text_clear(&S->c.nprompt);
+	S->sampler.c.f_t_ini = 1;
+	S->sampler.c.f_t_end = 0;
+	S->c.tuflags = 0;
 
+	//TODO: optimize for the case multiple generations with the same loras
 	mlis_cfg_loras_prompt_remove(S);
-	
-	dstr_realloc(S->c.prompt, strsl_len(ss));  //reserve memory
-	dstr_resize(S->c.prompt, 0);
-
-	// Prompt parsing
-	for (const char *cur=strsl_begin(ss), *end=strsl_end(ss); cur<end; ++cur) {
-		if (*cur == '<') {
-			const char *e=cur+1;
-			while (e < end && *e != '>') ++e;
-			if (*e != '>')
-				ERROR_LOG(MLIS_E_PROMPT_OPT, "prompt: '<' not matched with '>'");
-			TRY( mlis_cfg_prompt_option_parse(S, strsl_fromr(cur+1, e)) );
-			cur = e;
-			n_opt++;
-		}
-		else dstr_push(S->c.prompt, *cur);
-	}
-
-	if (n_opt > 0)
-		log_debug("Prompt options: %u", n_opt);
-
-end:
-	return R;
 }
 
 /*static
@@ -915,6 +867,10 @@ int parse_bool(const StrSlice ss, int *out)
 {
 	if (!strsl_cmpz(ss, "true")) { *out=1; return 1; }
 	if (!strsl_cmpz(ss, "false")) { *out=0; return 1; }
+	if (!strsl_cmpz(ss, "yes")) { *out=1; return 1; }
+	if (!strsl_cmpz(ss, "no")) { *out=0; return 1; }
+	if (!strsl_cmpz(ss, "y")) { *out=1; return 1; }
+	if (!strsl_cmpz(ss, "n")) { *out=0; return 1; }
 	if (!strsl_cmpz(ss, "1")) { *out=1; return 1; }
 	if (!strsl_cmpz(ss, "0")) { *out=0; return 1; }
 	return -1;
@@ -1409,11 +1365,11 @@ int mlis_mask_encode(MLIS_Ctx* S, const MLIS_Tensor* mask, MLIS_Tensor* lmask,
 	return 1;
 }
 
-int mlis_text_tokenize(MLIS_Ctx* S, const char* text, const int32_t** ptokens,
-	MLIS_Model model)
+static
+int mlis_prompt_text_tokenize(MLIS_Ctx* S, const PromptText* prompt,
+	int32_t** ptokvec, float** pwvec, MLIS_SubModel model)
 {
-	ERROR_HANDLE_BEGIN
-	DynStr tmps=NULL;
+	int R=1;
 
 	if (!S->clip_p)
 		TRY( mlis_setup(S) );
@@ -1421,32 +1377,55 @@ int mlis_text_tokenize(MLIS_Ctx* S, const char* text, const int32_t** ptokens,
 
 	// Select model
 	const ClipParams* clip_p=NULL;
-	if (model == MLIS_MODEL_CLIP) clip_p = S->clip_p;
-	else if (model == MLIS_MODEL_CLIP2) clip_p = S->clip2_p;
+	if (model == MLIS_SUBMODEL_CLIP) clip_p = S->clip_p;
+	else if (model == MLIS_SUBMODEL_CLIP2) clip_p = S->clip2_p;
 	if (!clip_p)
-		ERROR_LOG(MLIS_E_UNKNOWN, "invalid model for text tokenize: %d", model);
+		ERROR_LOG(MLIS_E_UNKNOWN, "invalid model for text tokenization: %d", model);
 
-	// Tokenize the prompt
-	IFFALSESET(text, "");
-	vec_resize(S->tokens, 0);
-	TRY( clip_tokenize(clip_p, strsl_fromz(text), &S->tokens) );
-	log_debug_vec("Tokens", S->tokens, i, 0, "%d '%s'",
-		S->tokens[i], clip_token_str(clip_p, S->tokens[i]) );
-	log_info("Prompt: %u tokens", vec_count(S->tokens));
+	// Tokenize the prompt chunks
+	vec_resize(*ptokvec, 0);
+	vec_resize(*pwvec, 0);
 
-	if (ptokens)
-		*ptokens = S->tokens;
-	R = vec_count(S->tokens);
+	vec_forp(struct PromptTextChunk, prompt->chunks, p, 0) {
+		unsigned n = vec_count(*ptokvec);
+		TRY( clip_tokenize(clip_p, p->text, ptokvec) );
 
+		vec_resize(*pwvec, vec_count(*ptokvec));
+		vec_for(*pwvec, i, n) (*pwvec)[i] = p->w;  // Weights
+	}
+	
+	log_debug_vec("Tokens", *ptokvec, i, 0, "%d '%s'",
+		(*ptokvec)[i], clip_token_str(clip_p, (*ptokvec)[i]) );
+	log_debug_vec("Weights", *pwvec, i, 0, "%g", (*pwvec)[i] );
+	log_info("Prompt: %u tokens", vec_count(*ptokvec));
+
+	R = vec_count(*ptokvec);
 end:
-	dstr_free(tmps);
+	return R;
+}
+
+int mlis_text_tokenize(MLIS_Ctx* S, const char* text, int32_t** ptokens,
+	MLIS_SubModel model)
+{
+	ERROR_HANDLE_BEGIN
+	int n;
+	
+	prompt_text_set_raw(&S->c.prompt, strsl_fromz(text));
+	TRY( n = mlis_prompt_text_tokenize(S, &S->c.prompt, &S->tokens,
+		&S->tokens_weights, model) );
+	if (ptokens) *ptokens = S->tokens;
+
+	R = n;
+end:
 	ERROR_HANDLE_END("mlis_text_tokenize")
 }
 
-int mlis_clip_text_encode(MLIS_Ctx* S, const char* prompt,
-	LocalTensor* embed, LocalTensor* feat, MLIS_Model model, int flags)
+static
+int mlis_clip_tokens_encode(MLIS_Ctx* S,
+	unsigned n_token, const int32_t* tokens, const float* weights,
+	LocalTensor* embed, LocalTensor* feat, MLIS_SubModel model, int flags)
 {
-	ERROR_HANDLE_BEGIN
+	int R=1;
 
 	TRY( mlis_setup(S) );
 	
@@ -1455,11 +1434,11 @@ int mlis_clip_text_encode(MLIS_Ctx* S, const char* prompt,
 	const ClipParams* clip_p=NULL;
 	const char *tprefix=NULL;
 	switch (model) {
-	case MLIS_MODEL_CLIP:
+	case MLIS_SUBMODEL_CLIP:
 		clip_p = S->clip_p;
 		tprefix = "clip";
 		break;
-	case MLIS_MODEL_CLIP2:
+	case MLIS_SUBMODEL_CLIP2:
 		clip_p = S->clip2_p;
 		tprefix = "clip2";
 		break;
@@ -1468,14 +1447,35 @@ int mlis_clip_text_encode(MLIS_Ctx* S, const char* prompt,
 	if (!clip_p)
 		ERROR_LOG(MLIS_E_UNKNOWN, "invalid model for text tokenize: %d", model);
 
-	// Tokenize
-	TRY( mlis_text_tokenize(S, prompt, NULL, model) );
-
 	// Encode
 	bool b_norm = !(flags & MLIS_CTEF_NO_NORM);
 	S->ctx.tprefix = tprefix;
-	TRY( clip_text_encode(&S->ctx, clip_p,
-		S->tokens, embed, feat, S->c.clip_skip, b_norm) );
+	TRY( clip_text_encode(&S->ctx, clip_p, n_token,
+		tokens, embed, feat, S->c.clip_skip, b_norm) );
+	
+	// Apply token weights
+	if (weights && embed) {
+		assert( embed->n[1] >= n_token+1 );
+		mlis_tensor_for(*embed, i) {
+			if (1 <= i1 && i1 <= n_token)
+				embed->d[ip] *= weights[i1-1];
+		}
+		//TODO: renormalize?
+	}
+
+end:
+	return R;
+}
+
+int mlis_clip_text_encode(MLIS_Ctx* S, const char* text,
+	MLIS_Tensor* embed, MLIS_Tensor* feat, MLIS_SubModel model, int flags)
+{
+	ERROR_HANDLE_BEGIN
+	
+	int n;
+	int32_t *tokens;
+	TRY( n = mlis_text_tokenize(S, text, &tokens, model) );
+	TRY( mlis_clip_tokens_encode(S, n, tokens, NULL, embed, feat, model, flags) );
 
 end:
 	ERROR_HANDLE_END("mlis_clip_text_encode")
@@ -1498,22 +1498,31 @@ size_t sd_timestep_embedding(unsigned nsteps, float* steps, unsigned dim,
 	return nsteps * dim;
 }
 
-int mlis_text_cond_encode(MLIS_Ctx* S, const char* prompt,
+static
+int mlis_text_cond_encode(MLIS_Ctx* S, const PromptText* prompt,
 	LocalTensor* cond, LocalTensor* label, int flags)
 {
 	ERROR_HANDLE_BEGIN
 	LocalTensor tmpt={0};
+	int32_t *tokens=NULL;
+	float *weights=NULL;
+	int n_token;
 
 	int cte_flags = 0;
 	if (!S->unet_p->clip_norm) cte_flags |= MLIS_CTEF_NO_NORM;
 
-	TRY( mlis_clip_text_encode(S, prompt, cond, NULL, MLIS_MODEL_CLIP, cte_flags) );
+	TRY( n_token = mlis_prompt_text_tokenize(S, prompt, &tokens, &weights,
+		MLIS_SUBMODEL_CLIP) );
+
+	TRY( mlis_clip_tokens_encode(S, n_token, tokens, weights, cond, NULL,
+		MLIS_SUBMODEL_CLIP, cte_flags) );
 
 	if (S->unet_p->cond_label) {
-		TRY( mlis_clip_text_encode(S, prompt, &tmpt, NULL, MLIS_MODEL_CLIP2,
-			cte_flags) );
+		TRY( mlis_clip_tokens_encode(S, n_token, tokens, weights, &tmpt, NULL, 
+			MLIS_SUBMODEL_CLIP2, cte_flags) );
 
 		// Concatenate both text embeddings
+		//TODO: create function
 		assert( cond->n[1] == tmpt.n[1] &&
 		        cond->n[2] == 1 && tmpt.n[2] == 1 &&
 			    cond->n[3] == 1 && tmpt.n[3] == 1 );	
@@ -1530,14 +1539,15 @@ int mlis_text_cond_encode(MLIS_Ctx* S, const char* prompt,
 		}
 		
 		//TODO: no need to reprocess from scratch...
-		TRY( mlis_clip_text_encode(S, prompt, NULL, label, MLIS_MODEL_CLIP2, 0) );
+		TRY( mlis_clip_tokens_encode(S, n_token, tokens, NULL, NULL, label, 
+			MLIS_SUBMODEL_CLIP2, 0) );
 
 		// Complete label embedding
 		assert( label->n[0]==n_emb2 &&
 			label->n[1]==1 && label->n[2]==1 && label->n[3]==1 );
 		ltensor_resize(label, S->unet_p->ch_adm_in, 1, 1, 1);
 		float *ld = label->d + n_emb2;
-		unsigned w = S->c.width, h = S->c.height;  //TODO: maybe different in img2img
+		unsigned w = S->c.width, h = S->c.height;  //TODO: may be different in img2img
 		// Original size
 		ld += sd_timestep_embedding(2, (float[]){h,w}, 256, 10000, ld);
 		// Crop top,left
@@ -1587,11 +1597,13 @@ void mlis_infotext_update(MLIS_Ctx* S, unsigned w, unsigned h)
 	dstr_resize(*out, 0);
 
 	// Imitates stable-diffusion-webui create_infotext
-	dstr_printfa(*out, "%s\n", S->c.prompt);
-	if (S->c.nprompt)
-		dstr_printfa(*out, "Negative prompt: %s\n", S->c.nprompt);
+	dstr_printfa(*out, "%s\n", S->c.prompt_raw);
+	if (!dstr_empty(S->c.nprompt_raw))
+		dstr_printfa(*out, "Negative prompt: %s\n", S->c.nprompt_raw);
 	dstr_printfa(*out, "Seed: %"PRIu64, g_rng.seed);
 	dstr_printfa(*out, ", Sampler: %s", mlis_method_str(S->sampler.c.method));
+	if (S->sampler.c.s_ancestral == 1)
+		dstr_printfa(*out, " ancestral");
 	dstr_printfa(*out, ", Schedule type: %s", mlis_sched_str(S->sampler.c.sched));
 	if (S->sampler.c.s_ancestral > 0)
 		dstr_printfa(*out, ", Ancestral: %g", S->sampler.c.s_ancestral);
@@ -1678,15 +1690,16 @@ int mlis_generate(MLIS_Ctx* S)
 	if (!(S->c.tuflags & MLIS_TUF_CONDITIONING))
 	{
 		// Text prompt
-		TRY( mlis_text_cond_encode(S, S->c.prompt, &S->cond, &S->label, 0) );
+		TRY( mlis_text_cond_encode(S, &S->c.prompt, &S->cond, &S->label, 0) );
 
 		// Negative text prompt
 		if (S->c.cfg_scale > 1)
 		{
-			TRY( mlis_text_cond_encode(S, S->c.nprompt, &S->ncond, &S->nlabel, 0) );
+			TRY( mlis_text_cond_encode(S, &S->c.nprompt, &S->ncond, &S->nlabel,
+				0) );
 
-			//TODO: move to unet
-			if (S->unet_p->uncond_empty_zero && !(S->c.nprompt && S->c.nprompt[0]))
+			//TODO: move to unet?
+			if (S->unet_p->uncond_empty_zero && dstr_empty(S->c.nprompt_raw))
 				ltensor_for(S->ncond,i,0) S->ncond.d[i] = 0;
 		}
 		

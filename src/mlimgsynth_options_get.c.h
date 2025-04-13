@@ -10,9 +10,9 @@ OPTION( MODEL_TYPE ) {
 	ARG_ENUM( S->c.model_type, mlis_model_type_froms );
 }
 OPTION( PROMPT ) {
-	ARG_STR( S->c.prompt );
+	ARG_STR( S->c.prompt_raw );
 }
 OPTION( NPROMPT ) {
-	ARG_STR( S->c.nprompt );
+	ARG_STR( S->c.nprompt_raw );
 }
 //TODO: complete

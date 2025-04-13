@@ -1,6 +1,6 @@
 # Makefile
 targets = test_rng tstore-util demo_mlimgsynth mlimgsynth \
-	test_text_tokenize_clip
+	test_text_tokenize_clip test_prompt_preproc
 targets_dlib = libmlimgsynth
 
 # Put your custom definitions in Makefile.local instead of changing this file
@@ -97,3 +97,5 @@ mlimgsynth: $(objs_base) image.o image_io.o image_io_pnm.o \
 	localtensor.o main_mlimgsynth.o
 
 test_text_tokenize_clip: test_text_tokenize_clip.o
+
+test_prompt_preproc: $(objs_base) test_prompt_preproc.o

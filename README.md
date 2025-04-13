@@ -1,6 +1,6 @@
 # MLImgSynth
 
-Generate images using Stable Diffusion (SD) models. This program is completely written in C and uses the [GGML](https://github.com/ggerganov/ggml/) library. It is largely based in [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp), but with a focus in more concise and clear code. Also, I put some care in the memory usage: at each step only the required weights will be loaded in the backend memory (e.g. VRAM). Moreover, with the options `--unet-split` and `--vae-tile` it is possible to run SDXL models using only 4 GiB without quantization.
+Generate images using Stable Diffusion (SD) models. This program is completely written in C and uses the [GGML](https://github.com/ggerganov/ggml/) library as inference backend. It is largely based in [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp), but with a focus in more concise and clear code. Also, I put some care in the memory usage: at each step only the required weights will be loaded in the backend memory (e.g. VRAM). Moreover, with the options `--unet-split` and `--vae-tile` it is possible to run SDXL models using only 4 GiB without quantization.
 
 ## Supported models
 
@@ -12,7 +12,7 @@ Besides the original weights, you may use any of the fine-tuned checkpoints that
 
 ## Usage on Windows
 
-Download and unzip the latest release. Edit the file `generate.bat` as needed and execute it.
+Download and unzip the latest [Release](https://github.com/aagdev/mlimgsynth/releases). Edit the file `generate.bat` as needed and execute it.
 
 ## Build
 
@@ -31,10 +31,10 @@ By default, the program is linked with `libpng` and `libjpeg` to support those f
 First, download the weights of the model you wish to use (safetensors and gguf formats supported). To generate an image (txt2img) use:
 
 ```shell
-./mlimgsynth generate -b Vulkan0 -m MODEL_PATH --cfg-scale 7 --steps 20 --seed 42 -o output.png -p "a box on a table"
+./mlimgsynth generate -m MODEL_PATH --cfg-scale 7 --steps 20 --seed 42 -o output.png -p "a box on a table"
 ```
 
-The option `-b` let's you select from the available backends. Use `Vulkan0` or `CUDA0` for GPU. By default `CPU` is used.
+The option `-b` lets you select from the available GGML backends. By default the "best" is used, usually GPU. Run `./mlimgsynth list-backends` to see the list of backends and devices.
 
 See the script `generate.sh` for a more complete example.
 
@@ -48,7 +48,18 @@ If the image has an alpha channel (transparency), it is used as a mask for inpai
 
 ### Lora's
 
-Lora's can be loaded indivually with the option `--lora PATH:MULT` or with the option `--lora-dir PATH` and adding to the prompt `<lora:NAME:MULT>`. In the last case, it will look for the file `PATH/NAME.safetensors`.
+Lora's can be loaded indivually with the option `--lora PATH,MULT` or with the option `--lora-dir PATH` and adding to the prompt `<lora:NAME:MULT>`. In the last case, it will look for the file `PATH/NAME.safetensors`.
+
+### Prompt emphasis (token weighting)
+
+You can increase or decrease the emphasis of certain parts of the prompt to make the model pay more or less attention to it. This uses the same syntax as [stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui). Examples:
+
+* `a (dog) jumping` increases the weight of "dog" by 1.1 .
+* `a ((dog)) jumping` increases twice, that is, by 1.21 .
+* `a [dog] jumping` decreases by 1.1 (weight ~ 0.91).
+* `a (dog:1.5) jumping` increases by 1.5 .
+
+You can disable all prompt processing (including loras) using the option `--no-prompt-parse y` *before* the prompt.
 
 ### TAE
 
@@ -60,7 +71,6 @@ All the important fuctionally is a library (libmlimgsynth) that you can use from
 
 ## Future plans
 
-- Complete prompt preprocessing to parse weights (e.g. `a (large) dog`).
 - API server and minimal web UI.
 - ControlNet.
 - Maybe SDE sampling. The biggest hurdle is understanding what it is doing the `torchsde.BrownianTree` used in `k-diffusion`.
