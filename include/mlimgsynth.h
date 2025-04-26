@@ -58,8 +58,8 @@ void gen() {
 #pragma GCC visibility push(default)
 #endif
 
-#define MLIS_VERSION  0x000401
-#define MLIS_VERSION_STR  "0.4.1"
+#define MLIS_VERSION  0x000402
+#define MLIS_VERSION_STR  "0.4.2"
 
 /* Enumerations */
 

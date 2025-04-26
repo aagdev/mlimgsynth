@@ -1,4 +1,4 @@
-/* Copyright 2024, Alejandro A. García <aag@zorzal.net>
+/* Copyright 2024-2025, Alejandro A. García <aag@zorzal.net>
  * SPDX-License-Identifier: MIT
  */
 #include "mlblock.h"
@@ -7,10 +7,11 @@
 
 #define F_MIB  (1.0 / (1024.0*1024.0))
 
-#define mllog_debug2(...)  if (!C->c.quiet) log_debug2(__VA_ARGS__)
-#define mllog_debug(...)   if (!C->c.quiet) log_debug(__VA_ARGS__)
-#define mllog_info(...)    if (!C->c.quiet) log_info(__VA_ARGS__)
-#define mllog_warn(...)    if (!C->c.quiet) log_warn(__VA_ARGS__)
+#define QUIET_IS  (C->c.flags_e & MLB_F_QUIET)
+#define mllog_debug2(...)  if (!QUIET_IS) log_debug2(__VA_ARGS__)
+#define mllog_debug(...)   if (!QUIET_IS) log_debug(__VA_ARGS__)
+#define mllog_info(...)    if (!QUIET_IS) log_info(__VA_ARGS__)
+#define mllog_warn(...)    if (!QUIET_IS) log_warn(__VA_ARGS__)
 #define mllog_error(...)   log_error(__VA_ARGS__)
 
 #define id_fromz(X)  strsto_add(C->ss, strsl_fromz(X))
@@ -22,6 +23,7 @@ void mlctx_free(MLCtx* C)
 		ggml_gallocr_free(C->allocr);
 		C->allocr=NULL;
 	}
+#if USE_GGML_SCHED
 	if (C->sched) {
 		ggml_backend_sched_free(C->sched);
 		C->sched = NULL;
@@ -30,6 +32,7 @@ void mlctx_free(MLCtx* C)
 		ggml_backend_buffer_free(C->bkbuf);
 		C->bkbuf = NULL;
 	}
+#endif
 	
 	vec_free(C->tensors);
 	vec_free(C->inputs);
@@ -41,10 +44,11 @@ void mlctx_free(MLCtx* C)
 		C->cp = NULL;
 		C->graph = NULL;
 	}
+}
 
-	//TODO: separate resettable options
-	//C->c.multi_compute = false;
-	//C->c.quiet = false;
+void mlctx_end(MLCtx* C)
+{
+	mlctx_free(C);
 }
 
 void mlctx_begin(MLCtx* C, const char* name)
@@ -56,7 +60,8 @@ void mlctx_begin(MLCtx* C, const char* name)
 	C->cc = ggml_init((struct ggml_init_params){ size, NULL, true });
 	C->cp = ggml_init((struct ggml_init_params){ size, NULL, true });
 	C->c.name = name ? name : "";
-	C->info = (struct MLCtxInfo){0};
+	C->c.flags_e = C->c.flags;
+	MEM_ZERO(C->info);
 }
 
 int mlctx_load_prep(MLCtx* C)
@@ -104,7 +109,7 @@ int mlctx_build(MLCtx* C, MLTensor* result)
 	int R=1;
 	assert(!C->graph);
 	
-	if (C->c.dump) {
+	if (C->c.flags_e & MLB_F_DUMP) {
 		DynStr path = dstr_stack(64);
 		dstr_printf(path, "dump-graph-%s.txt", C->c.name);
 		TRYR( mlctx_block_graph_dump_path(C, path) );
@@ -124,7 +129,7 @@ int mlctx_build(MLCtx* C, MLTensor* result)
 			// Allows the computation can be repeated without reloading
 			// the parameters.
 			// Will increase memory usage, but it is not so much usually.
-			if (C->c.multi_compute)
+			if (C->c.flags_e & MLB_F_MULTI_COMPUTE)
 				ggml_set_output(p->tensor);
 		}
 	}
@@ -156,9 +161,9 @@ int mlctx_build(MLCtx* C, MLTensor* result)
 int mlctx_alloc(MLCtx* C)
 {
 	int R=1;
-	assert(!C->allocr && !C->sched);
 
 #if !USE_GGML_SCHED
+	assert(!C->allocr);
 	C->allocr = ggml_gallocr_new(
 		ggml_backend_get_default_buffer_type(C->backend) );
 
@@ -175,6 +180,7 @@ int mlctx_alloc(MLCtx* C)
 		C->info.mem_total - C->info.mem_params : 0;
 
 #else
+	assert(!C->sched);
 	C->bkbuf = ggml_backend_alloc_ctx_tensors(C->cp, C->backend);
 	if (!C->bkbuf)
 		ERROR_LOG(-1, "could not allocate parameter tensors");
@@ -309,7 +315,7 @@ int mlctx_prep(MLCtx* C)
 {
 	TRYRB(-1, vec_count(C->tensors) > 0);
 	MLTensor *result = vec_last(C->tensors,0).tensor;
-	if (C->tprefix) mlctx_tensor_add(C, C->tprefix, result);
+	if (C->c.tprefix) mlctx_tensor_add(C, C->c.tprefix, result);
 	TRYR( mlctx_build_alloc(C, result) );
 	TRYR( mlctx_tstore_load(C, C->tstore) );
 	return 1;

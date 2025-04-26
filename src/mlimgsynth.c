@@ -1,4 +1,4 @@
-/* Copyright 2024, Alejandro A. García <aag@zorzal.net>
+/* Copyright 2024-2025, Alejandro A. García <aag@zorzal.net>
  * SPDX-License-Identifier: MIT
  */
 #define MLIS_IMPLEMENTATION 1
@@ -1295,7 +1295,7 @@ int mlis_setup(MLIS_Ctx* S)
 		S->rflags |= MLIS_READY_LORAS;
 	}
 
-	S->ctx.c.dump = !!(S->c.dump_flags & MLIS_DUMP_GRAPH);
+	ccFLAG_SET( S->ctx.c.flags, MLB_F_DUMP, S->c.dump_flags & MLIS_DUMP_GRAPH );
 
 end:
 	ERROR_HANDLE_END("mlis_setup")
@@ -1309,10 +1309,10 @@ int mlis_image_encode(MLIS_Ctx* S, const LocalTensor* image, LocalTensor* latent
 	TRY( mlis_setup(S) );
 	
 	if (S->c.flags & MLIS_CF_USE_TAE) {
-		S->ctx.tprefix = "tae";
+		S->ctx.c.tprefix = "tae";
 		TRY( sdtae_encode(&S->ctx, S->tae_p, image, latent) );
 	} else {
-		S->ctx.tprefix = "vae";
+		S->ctx.c.tprefix = "vae";
 		TRY( sdvae_encode(&S->ctx, S->vae_p, image, latent, S->c.vae_tile) );
 		
 		// Sample if needed
@@ -1338,10 +1338,10 @@ int mlis_image_decode(MLIS_Ctx* S, const LocalTensor* latent, LocalTensor* image
 	TRY( mlis_setup(S) );
 	
 	if (S->c.flags & MLIS_CF_USE_TAE) {
-		S->ctx.tprefix = "tae";
+		S->ctx.c.tprefix = "tae";
 		TRY( sdtae_decode(&S->ctx, S->tae_p, latent, image) );
 	} else {
-		S->ctx.tprefix = "vae";
+		S->ctx.c.tprefix = "vae";
 		TRY( sdvae_decode(&S->ctx, S->vae_p, latent, image, S->c.vae_tile) );
 	}
 
@@ -1449,7 +1449,7 @@ int mlis_clip_tokens_encode(MLIS_Ctx* S,
 
 	// Encode
 	bool b_norm = !(flags & MLIS_CTEF_NO_NORM);
-	S->ctx.tprefix = tprefix;
+	S->ctx.c.tprefix = tprefix;
 	TRY( clip_text_encode(&S->ctx, clip_p, n_token,
 		tokens, embed, feat, S->c.clip_skip, b_norm) );
 	
@@ -1729,7 +1729,7 @@ int mlis_generate(MLIS_Ctx* S)
 	TRY( dnsamp_init(&S->sampler) );
 	
 	// Prepare computation
-	S->ctx.tprefix = "unet";
+	S->ctx.c.tprefix = "unet";
 	TRY( unet_denoise_init(&unet, &S->ctx, S->unet_p, w, h,
 		S->c.flags & MLIS_CF_UNET_SPLIT) );
 	
@@ -1750,8 +1750,7 @@ int mlis_generate(MLIS_Ctx* S)
 	}
 	TRY(r);
 	
-	// Free memory
-	mlctx_free(&S->ctx);  
+	mlctx_end(&S->ctx);  
 
 	// Decode
 	if (!(S->c.flags & MLIS_CF_NO_DECODE))
@@ -1769,7 +1768,7 @@ int mlis_generate(MLIS_Ctx* S)
 
 end:
 	ltensor_free(&tmpt);
-	mlctx_free(&S->ctx);
+	mlctx_end(&S->ctx);
 	ERROR_HANDLE_END("mlis_generate")
 }
 

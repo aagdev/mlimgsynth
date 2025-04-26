@@ -1,4 +1,4 @@
-/* Copyright 2024, Alejandro A. García <aag@zorzal.net>
+/* Copyright 2024-2025, Alejandro A. García <aag@zorzal.net>
  * SPDX-License-Identifier: MIT
  */
 #include "vae.h"
@@ -244,8 +244,8 @@ int sdvae_encode(MLCtx* C, const VaeParams* P,
 	};
 	
 	// Prepare computation
-	C->c.multi_compute = (tile_px > 0);
 	mlctx_begin(C, "VAE encode");
+	if (tile_px > 0) C->c.flags_e |= MLB_F_MULTI_COMPUTE;
 	MLTensor *input = mlctx_input_new(C, "img", GGML_TYPE_F32, n0, n1, 3, 1);
 	MLTensor *output = mlb_sdvae_encoder(C, input, P);
 	TRY( mlctx_prep(C) );
@@ -278,7 +278,7 @@ int sdvae_encode(MLCtx* C, const VaeParams* P,
 
 				sdvae_encoder_pre(&itmp, &itmp);
 				ltensor_to_backend(&itmp, input);
-				if (i_tile > 0) C->c.quiet = true;
+				if (i_tile > 0) C->c.flags_e |= MLB_F_QUIET;
 				TRY( mlctx_compute(C) );
 				ltensor_from_backend(&itmp, output);
 				log_debug3_ltensor(&itmp, "vae enc");
@@ -309,10 +309,9 @@ int sdvae_encode(MLCtx* C, const VaeParams* P,
 	log_debug2_ltensor(latent, "vae enc");
 
 end:
-	C->c.quiet = false;
 	ltensor_free(&itmp);
 	ltensor_free(&ltmp);
-	mlctx_free(C);
+	mlctx_end(C);
 	return R;
 }
 
@@ -320,7 +319,6 @@ int sdvae_decode(MLCtx* C, const VaeParams* P,
 	const LocalTensor* latent, LocalTensor* img, int tile_px)
 {
 	int R=1;
-	MLCtx ctx={0};
 	LocalTensor ltmp={0}, itmp={0};
 
 	assert( isfinite( ltensor_sum(latent) ) );
@@ -341,8 +339,8 @@ int sdvae_decode(MLCtx* C, const VaeParams* P,
 	};
 
 	// Prepare computation
-	C->c.multi_compute = (tile_px > 0);
 	mlctx_begin(C, "VAE decode");
+	if (tile_px > 0) C->c.flags_e |= MLB_F_MULTI_COMPUTE;
 	MLTensor *input = mlctx_input_new(C, "latent", GGML_TYPE_F32, n0, n1, 4, 1);
 	MLTensor *output = mlb_sdvae_decoder(C, input, P);
 	TRY( mlctx_prep(C) );
@@ -375,7 +373,7 @@ int sdvae_decode(MLCtx* C, const VaeParams* P,
 				ltensor_copy_slice2(&ltmp, latent, n0,n1, 0,0, i0,i1, 1,1, 1,1);
 
 				ltensor_to_backend(&ltmp, input);
-				if (i_tile > 0) C->c.quiet = true;
+				if (i_tile > 0) C->c.flags_e |= MLB_F_QUIET;
 				TRY( mlctx_compute(C) );
 				ltensor_from_backend(&ltmp, output);
 				log_debug3_ltensor(&ltmp, "vae dec");
@@ -406,9 +404,8 @@ int sdvae_decode(MLCtx* C, const VaeParams* P,
 	log_debug2_ltensor(img, "vae dec");
 
 end:
-	C->c.quiet = false;
 	ltensor_free(&ltmp);
 	ltensor_free(&itmp);
-	mlctx_free(&ctx);
+	mlctx_end(C);
 	return R;
 }

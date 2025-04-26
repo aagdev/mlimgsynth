@@ -1,4 +1,4 @@
-/* Copyright 2024, Alejandro A. García <aag@zorzal.net>
+/* Copyright 2024-2025, Alejandro A. García <aag@zorzal.net>
  * SPDX-License-Identifier: MIT
  *
  * Machine learning blocks of operations.
@@ -26,37 +26,49 @@ enum {
 	MLB_NAME_SPLIT			= -0x1001,
 };
 
+enum MLCtxFlags {
+	// Prepare the computation to allow multiple calls to mlctx_compute
+	MLB_F_MULTI_COMPUTE = 1,
+	// Do produce any information output
+	MLB_F_QUIET			= 2,
+	//(debug) Dump the computation graph to a file
+	MLB_F_DUMP			= 4,
+};
+
 typedef struct {
 	MLTensor *tensor;
 	StringInt name,
-	          key;  //full name to load from the tensor store
+	          key;  //Full name to load from the tensor store
 } MLCtxTensor;
 
 typedef struct {
-	ggml_backend_t backend, backend2;  //Fill
+	ggml_backend_t backend;  //Fill
 	TensorStore *tstore;  //Fill
-	const char *tprefix;  //Set to load tensors with a prefix
-	StringStore *ss;  //tensor names are stored here
+	StringStore *ss;  //Tensor names are stored here
 	
 	struct ggml_context *cp, *cc; //params, compute
 	struct ggml_cgraph *graph;
     ggml_gallocr_t allocr;
+
+#if USE_GGML_SCHED
+	ggml_backend_t backend2;  //Fill
 	ggml_backend_sched_t sched;
 	ggml_backend_buffer_t bkbuf;
+#endif
 	
 	MLCtxTensor * tensors;  //vector
 	MLTensor ** inputs;  //vector
 	MLTensor * result;
 
-	// Config
+	// Configuration
 	struct {
 		enum ggml_type wtype;  //weights type (default F16)
 		unsigned n_tensor_max;
-		unsigned multi_compute:1,  //allow multiple calls to compute
-		         quiet:1,  //do not output information
-				 dump:1;  //(debug) dump graph to a text file
-		const char *name;
 		char tpath_sep;  //default: '.'
+		const char *tprefix;  //Tensor names prefix
+		const char *name;  //Computation name, set by mlctx_begin
+		int flags;  //MLB_F_*
+		int flags_e;  //Flags valid until the next mlctx_begin
 	} c;
 
 	// Information/statistics
@@ -70,6 +82,8 @@ typedef struct {
 void mlctx_free(MLCtx* C);
 
 void mlctx_begin(MLCtx* C, const char* name);
+
+void mlctx_end(MLCtx* C);
 
 // All in one
 int mlctx_run_(MLCtx* C, LocalTensor* out, const LocalTensor** inputs);

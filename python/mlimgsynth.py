@@ -8,8 +8,8 @@ import os, sys, ctypes
 
 ## Constants
 
-MLIS_VERSION = 0x000400
-MLIS_VERSION_STR = "0.4.0"
+MLIS_VERSION = 0x000402
+MLIS_VERSION_STR = "0.4.2"
 
 MLIS_E_UNKNOWN			= -1
 MLIS_E_VERSION			= -2

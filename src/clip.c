@@ -482,6 +482,7 @@ int clip_text_encode(MLCtx* C, const ClipParams* P, unsigned n_tok,
 		ltensor_from_backend(feat, t_feat);
 
 end:
+	mlctx_end(C);
 	vec_free(tokens);
 	return R;
 }

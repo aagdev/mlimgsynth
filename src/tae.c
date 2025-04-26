@@ -1,4 +1,4 @@
-/* Copyright 2024, Alejandro A. García <aag@zorzal.net>
+/* Copyright 2024-2025, Alejandro A. García <aag@zorzal.net>
  * SPDX-License-Identifier: MIT
  */
 #include "tae.h"
@@ -131,5 +131,6 @@ int sdtae_decode(MLCtx* C, const SdTaeParams* P,
 	TRY( mlctx_run(C, img, latent) );
 
 end:
+	mlctx_end(C);
 	return R;
 }

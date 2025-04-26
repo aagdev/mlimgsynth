@@ -1,107 +1,10 @@
-/* Copyright 2024, Alejandro A. García <aag@zorzal.net>
+/* Copyright 2024-2025, Alejandro A. García <aag@zorzal.net>
  * SPDX-License-Identifier: MIT
  */
 #include "lora.h"
 #include "ccommon/logging.h"
 #include "ggml.h"
 #include <math.h>
-
-/*static
-int tstensor_to_ggml(struct ggml_tensor **out, struct ggml_context *ctx, 
-	TSTensorEntry* te, TSTensorData* td, int wtype, int tdgflags)
-{
-	struct ggml_tensor* ten=NULL;
-	int tsdt = tstore_dtype_from_ggml(wtype);	
-	ten = ggml_new_tensor_4d(ctx, wtype, TSTENSOR_SHAPE4_UNPACK(*te));
-	TRYR( tstore_tensor_data_get(te, tsdt, tdgflags, td) );
-	assert( td->size == ggml_nbytes(ten) );
-	ten->data = td->data;
-	*out = ten;
-	return 1;
-}
-
-int lora_apply_inner(TSTensorEntry* dst, TSTensorEntry* ld, TSTensorEntry* lu,
-	TSTensorEntry *ls, TSTensorEntry *la, float mult, MLCtx ctx)
-{
-	int R=1;
-	TSTensorData td_ld={0}, td_lu={0}, td_ls={0}, td_dst={0};
-
-	struct ggml_context *ctx=NULL;
-	struct ggml_cgraph *gf;
-	struct ggml_tensor *t_ld, *t_lu, *t_ls, *t_dst, *t_lora;
-	
-	unsigned n_inner = ld->shape[ld->shape_n-1],
-	         n0 = tstore_tensor_count(ld) / n_inner,
-			 n1 = tstore_tensor_count(lu) / n_inner;
-
-	if (!(dst->shape_n >= 2 &&
-		ld->shape_n == dst->shape_n &&
-		lu->shape_n == dst->shape_n &&
-		tstore_tensor_count(dst) == n0 * n1))
-	{
-		ERROR_LOG(-1, "lora up/down invalid shapes");
-	}
-
-	// ggml init
-	size_t size = ggml_tensor_overhead() * 32 + ggml_graph_overhead()
-		+ tstore_tensor_count(ld)*4 + tstore_tensor_count(dst)*4*2;
-	ctx = ggml_init((struct ggml_init_params){ size, NULL, true });
-
-	// Scale get
-	float scale=1;
-	if (ls) {
-		TRY( tstensor_to_ggml(&t_ls, ctx, ls, &td_ls, GGML_TYPE_F32, 0) );
-		scale = *(float*)t_ls->data;
-	}
-	else if (la) {
-		TRY( tstensor_to_ggml(&t_ls, ctx, la, &td_ls, GGML_TYPE_F32, 0) );
-		scale = *(float*)t_ls->data / n_inner;
-	}
-	scale *= mult;
-	assert( scale > 0 );
-	
-	// Load tensors
-	int wtype = GGML_TYPE_F16;  //TODO: param
-	t_ld  = ggml_new_tensor_4d(ctx, wtype, TSTENSOR_SHAPE4_UNPACK(*ld ));
-	t_lu  = ggml_new_tensor_4d(ctx, wtype, TSTENSOR_SHAPE4_UNPACK(*lu ));
-	t_dst = ggml_new_tensor_4d(ctx, wtype, TSTENSOR_SHAPE4_UNPACK(*dst));
-	
-	t_ld  = ggml_reshape_2d(ctx, t_ld , n0, n_inner);
-	t_lu  = ggml_reshape_2d(ctx, t_lu , n_inner, n1);
-	t_dst = ggml_reshape_2d(ctx, t_dst, n0, n1);
-
-	// Make graph
-	//ggml_set_no_alloc(ctx, false);
-	gf = ggml_new_graph(ctx);
-	t_ld   = ggml_cont(ctx, ggml_transpose(ctx, t_ld));
-	t_lora = ggml_mul_mat(ctx, t_lu, t_ld);
-	t_lora = ggml_cont(ctx, ggml_transpose(ctx, t_lora));
-	t_lora = ggml_scale_inplace(ctx, t_lora, scale);
-	t_dst  = ggml_add_inplace(ctx, t_dst, t_lora);
-	ggml_build_forward_expand(gf, t_dst);
-
-	// Alloc and set inputs
-
-	TRY( tstensor_to_ggml(&t_ld , ctx, ld , &td_ld , wtype, 0) );
-	TRY( tstensor_to_ggml(&t_lu , ctx, lu , &td_lu , wtype, 0) );
-	TRY( tstensor_to_ggml(&t_dst, ctx, dst, &td_dst, wtype,
-			TSTDG_F_PERM | TSTDG_F_WRITE) );
-	
-	// Compute
-	int r = ggml_graph_compute_with_ctx(ctx, gf, 0);
-	if (r) ERROR_LOG(-1, "ggml compute: %d", r);
-
-	// Store
-	assert( ggml_nbytes(t_dst) == td_dst.size );
-	memcpy(td_dst.data, t_dst->data, td_dst.size);
-
-end:
-	tstore_tdata_free(&td_dst);
-	tstore_tdata_free(&td_lu);
-	tstore_tdata_free(&td_ld);
-	ggml_free(ctx);
-	return R;
-}*/
 
 int lora_apply_inner(TSTensorEntry* dst, TSTensorEntry* ld, TSTensorEntry* lu,
 	TSTensorEntry *ls, TSTensorEntry *la, float mult, MLCtx* C)
@@ -123,7 +26,7 @@ int lora_apply_inner(TSTensorEntry* dst, TSTensorEntry* ld, TSTensorEntry* lu,
 
 	// Must init ggml before any tensor conversion
 	mlctx_begin(C, "lora");
-	C->c.quiet = true;
+	C->c.flags_e |= MLB_F_QUIET;
 
 	// Scale get
 	float scale=1;
@@ -184,11 +87,10 @@ int lora_apply_inner(TSTensorEntry* dst, TSTensorEntry* ld, TSTensorEntry* lu,
 		ERROR_LOG(-1, "NaN in LoRA result");
 
 end:
+	mlctx_end(C);
 	tstore_tdata_free(&td_dst);
 	tstore_tdata_free(&td_lu);
 	tstore_tdata_free(&td_ld);
-	mlctx_free(C);
-	C->c.quiet = false;
 	return R;
 }
 

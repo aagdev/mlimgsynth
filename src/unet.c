@@ -1,4 +1,4 @@
-/* Copyright 2024, Alejandro A. García <aag@zorzal.net>
+/* Copyright 2024-2025, Alejandro A. García <aag@zorzal.net>
  * SPDX-License-Identifier: MIT
  */
 #include "unet.h"
@@ -344,8 +344,8 @@ int unet_denoise_init(UnetState* S, MLCtx* C, const UnetParams* P,
 
 	if (!split) {
 		// Prepare computation
-		C->c.multi_compute = true;
 		mlctx_begin(C, "UNet");
+		C->c.flags_e |= MLB_F_MULTI_COMPUTE;
 
 		MLTensor *t_x, *t_t, *t_c, *t_l=NULL;
 		t_x = mlctx_input_new(C, "x", GGML_TYPE_F32, lw, lh, 4, 1);
@@ -453,7 +453,7 @@ end:
 	vec_free(lstack);
 	ltensor_free(&emb);
 	vec_free(tstack);
-	mlctx_free(C);
+	mlctx_end(C);
 	return R;
 }
 
@@ -472,7 +472,7 @@ int unet_denoise_run(UnetState* S,
 	ltensor_for(*dx,i,0) dx->d[i] = x->d[i] * c_in;
 
 	// Compute
-	if (!S->split || S->nfe > 0) S->ctx->c.quiet = true;
+	if (!S->split || S->nfe > 0) S->ctx->c.flags_e |= MLB_F_QUIET;
 	double t_comp = timing_time();
 	if (S->split) {
 		TRY( unet_compute_split(S->ctx, S->par, dx, cond, label, t, dx) );
@@ -494,6 +494,5 @@ int unet_denoise_run(UnetState* S,
 	}
 
 end:
-	S->ctx->c.quiet = false;
 	return R;
 }
