@@ -119,7 +119,7 @@ MLTensor* mlb_upsample(MLCtx* C, MLTensor* x, int ch_out)
 {
 	mlctx_block_begin(C);
 	// x: [N, ch_in, h, w]
-	x = ggml_upscale(C->cc, x, 2);
+	x = ggml_upscale(C->cc, x, 2, GGML_SCALE_MODE_NEAREST);
 	x = MLN("conv", mlb_nn_conv2d(C, x, ch_out, 3,3, 1,1, 1,1, 1,1, T));
 	// x: [N, ch_out, h*2, w*2]
 	return x;
