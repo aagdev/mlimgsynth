@@ -79,7 +79,7 @@ MLTensor* mlb_sdtae_decoder(MLCtx* C, MLTensor* x, const SdTaeParams* P)
 	for (int j=0; j<3; ++j) {
 		for (int i=0; i<P->n_blk; ++i)
 			x = MLN(IDX2NAME(iblk++), mlb_sdtae_block(C, x, P->ch_inner));
-		x = ggml_upscale(C->cc, x, 2);  iblk++;
+		x = ggml_upscale(C->cc, x, 2, GGML_SCALE_MODE_NEAREST);  iblk++;
 		x = MLN(IDX2NAME(iblk++), mlb_nn_conv2d(C, x,
 			P->ch_inner, 3,3, 1,1, 1,1, 1,1, false));
 	}
